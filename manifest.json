@@ -12,16 +12,17 @@
     "Lighting",
     "Notification"
   ],
-  "parent": {
-    "id": "VisualAlert",
-    "name": "VisualAlert",
-    "namespace": "VisualAlert",
-    "location": "https://raw.githubusercontent.com/TechBill/visualalert/master/VisualAlert.groovy",
-    "required": true
-  },
   "apps": [
     {
-      "id": "VisualAlert Child",
+      "id": "VisualAlert",
+      "name": "VisualAlert",
+      "namespace": "VisualAlert",
+      "location": "https://raw.githubusercontent.com/TechBill/visualalert/master/VisualAlert.groovy",
+      "required": true,
+      "oauth": false
+    },
+    {
+      "id": "VisualAlertChild",
       "name": "VisualAlert Child",
       "namespace": "VisualAlert",
       "location": "https://raw.githubusercontent.com/TechBill/visualalert/master/VisualAlertChild.groovy",
