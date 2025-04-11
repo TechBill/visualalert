@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# IDEs
+.vscode/
+.idea/
+
+# OS-generated
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Temp files
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# Node
+node_modules/

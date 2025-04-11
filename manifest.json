@@ -1,0 +1,34 @@
+{
+    "packageName": "VisualAlert",
+    "version": "1.1.2",
+    "minimumHEVersion": "2.2.8",
+    "author": "Bill Fleming",
+    "dateReleased": "2025-04-10",
+    "license": "Apache License, Version 2.0",
+    "description": "Advanced visual notification system optimized for deaf and hard of hearing users.",
+    "category": "Convenience",
+    "tags": [
+        "alerts",
+        "visual",
+        "notifications",
+        "deaf",
+        "accessibility"
+    ],
+    "parent": {
+        "id": "VisualAlert",
+        "name": "VisualAlert",
+        "namespace": "VisualAlert",
+        "location": "https://raw.githubusercontent.com/TechBill/visualalert/main/VisualAlert.groovy",
+        "required": true
+    },
+    "apps": [
+        {
+            "id": "VisualAlertChild",
+            "name": "VisualAlert Child",
+            "namespace": "VisualAlert",
+            "location": "https://raw.githubusercontent.com/TechBill/visualalert/main/VisualAlertChild.groovy",
+            "required": true,
+            "oauth": false
+        }
+    ]
+}
