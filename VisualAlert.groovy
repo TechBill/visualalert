@@ -7,7 +7,7 @@
  *  Copyright 2024
  *  Licensed under the Apache License, Version 2.0
  *
- *  Version: 1.1.2
+ *  Version: 1.1.3
  */
 
 definition(
@@ -45,7 +45,7 @@ def mainPage() {
                 // Removed description paragraph
                 app(name: "visualAlertChildApps",
                     appName: "VisualAlert Child",
-                    namespace: "VisualAlert",
+                    namespace: "TechBill",
                     title: "Create VisualAlert Child", // Changed button text
                     multiple: true)
             }
