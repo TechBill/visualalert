@@ -12,7 +12,7 @@
 
 definition(
     name: "VisualAlert Child",
-    namespace: "VisualAlert",
+    namespace: "TechBill",
     author: "Bill Fleming",
     description: "Configure individual visual alert patterns and triggers",
     parent: "VisualAlert:VisualAlert",

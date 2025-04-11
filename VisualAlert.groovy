@@ -12,7 +12,7 @@
 
 definition(
     name: "VisualAlert",
-    namespace: "VisualAlert",
+    namespace: "TechBill",
     author: "Bill Fleming",
     description: "Advanced visual notification system using smart devices for alerts and notifications",
     category: "Convenience",
