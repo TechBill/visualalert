@@ -7,28 +7,22 @@
     "license": "Apache License, Version 2.0",
     "description": "Advanced visual notification system optimized for deaf and hard of hearing users.",
     "category": "Convenience",
-    "tags": [
-        "alerts",
-        "visual",
-        "notifications",
-        "deaf",
-        "accessibility"
-    ],
+    "tags": ["Accessibility", "Lighting", "Notification"],
     "parent": {
-        "id": "VisualAlert",
-        "name": "VisualAlert",
-        "namespace": "VisualAlert",
-        "location": "https://raw.githubusercontent.com/TechBill/visualalert/main/VisualAlert.groovy",
-        "required": true
+      "id": "VisualAlert",
+      "name": "VisualAlert",
+      "namespace": "VisualAlert",
+      "location": "https://raw.githubusercontent.com/TechBill/visualalert/main/VisualAlert.groovy",
+      "required": true
     },
     "apps": [
-        {
-            "id": "VisualAlertChild",
-            "name": "VisualAlert Child",
-            "namespace": "VisualAlert",
-            "location": "https://raw.githubusercontent.com/TechBill/visualalert/main/VisualAlertChild.groovy",
-            "required": true,
-            "oauth": false
-        }
+      {
+        "id": "VisualAlertChild",
+        "name": "VisualAlert Child",
+        "namespace": "VisualAlert",
+        "location": "https://raw.githubusercontent.com/TechBill/visualalert/main/VisualAlertChild.groovy",
+        "required": true,
+        "oauth": false
+      }
     ]
-}
+  }
