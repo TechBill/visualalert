@@ -15,7 +15,7 @@ definition(
     namespace: "TechBill",
     author: "Bill Fleming",
     description: "Configure individual visual alert patterns and triggers",
-    parent: "VisualAlert:VisualAlert",
+    parent: "TechBill:VisualAlert",
     category: "Convenience",
     iconUrl: "http://cdn.device-icons.smartthings.com/Lighting/light11-icn.png",
     iconX2Url: "http://cdn.device-icons.smartthings.com/Lighting/light11-icn@2x.png",
