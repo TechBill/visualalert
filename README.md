@@ -50,7 +50,7 @@ If VisualAlert is not listed in search yet:
 6. Paste the following URL:
 
 ```
-https://raw.githubusercontent.com/TechBill/visualalert/master/manifest.json
+https://raw.githubusercontent.com/TechBill/visualalert/master/packageManifest.json
 ```
 
 7. Click **Next** and follow the install prompts
