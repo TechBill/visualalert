@@ -21,7 +21,7 @@
   },
   "apps": [
     {
-      "id": "VisualAlertChild",
+      "id": "VisualAlert Child",
       "name": "VisualAlert Child",
       "namespace": "VisualAlert",
       "location": "https://raw.githubusercontent.com/TechBill/visualalert/master/VisualAlertChild.groovy",
