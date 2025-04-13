@@ -53,7 +53,19 @@ def mainPage() {
                 multiple: true,
                 required: false,
                 submitOnChange: true,
-                description: "Select switches that can trigger this alert when turned ON"
+                description: "Select switches that can trigger this alert" // Updated description
+            // Dynamic inputs for ON/OFF selection for each trigger switch
+            if (triggerSwitches) {
+                triggerSwitches.each { device ->
+                    input "switchTrigger_${device.id}", "enum",
+                        title: "${device.displayName} Trigger",
+                        options: ["ON", "OFF"],
+                        required: true,
+                        defaultValue: "ON",
+                        description: "Trigger when this switch turns ON or OFF?"
+                }
+            }
+
 
             input "buttons", "capability.pushableButton",
                 title: "Buttons",
@@ -486,12 +498,13 @@ def subscribeToEvents() {
             }
         }
 
-        // Switches - Trigger
+        // Switches - Trigger (Subscribe to both ON and OFF)
         if (triggerSwitches) {
             logDebug "Setting up switch subscriptions for ${triggerSwitches.size()} devices"
             triggerSwitches.each { device ->
-                logDebug "Subscribing to switch device: ${device.displayName} (ID: ${device.id})"
-                subscribe(device, "switch.on", switchHandler) // Subscribe to 'on' event
+                logDebug "Subscribing to switch ON/OFF events for: ${device.displayName} (ID: ${device.id})"
+                subscribe(device, "switch.on", switchHandler)
+                subscribe(device, "switch.off", switchHandler)
             }
         }
         // Contact Sensors - Trigger
@@ -629,7 +642,7 @@ def appButtonHandler(btn) {
     }
 }
 
-// Handles switch 'on' events for trigger switches
+// Handles switch 'on' and 'off' events for trigger switches
 def switchHandler(evt) {
     // Check if disabled
     if (state.isDisabled) {
@@ -639,15 +652,30 @@ def switchHandler(evt) {
     logDebug "*************** Switch Handler ***************"
     logDebug "Switch Event: device=${evt.device.displayName}, deviceId=${evt.deviceId}, value=${evt.value}"
 
-    // Check if the event value is 'on' (although we only subscribed to 'on')
-    if (evt.value == "on") {
-        log.info "Trigger switch turned ON: ${evt.device.displayName}"
-        state.lastTriggerDevice = evt.deviceId
-        // Call startAlert - it handles conditions and stopping existing alerts
-        startAlert("Switch ${evt.device.displayName} turned on")
+    def deviceId = evt.deviceId
+    def eventValue = evt.value // "on" or "off"
+    def deviceName = evt.device.displayName
+
+    // Get the configured trigger condition ("ON" or "OFF") for this specific switch
+    def settingName = "switchTrigger_${deviceId}"
+    def configuredTrigger = settings[settingName] // Access setting dynamically
+
+    // Check if a trigger condition is actually configured for this switch
+    if (!configuredTrigger) {
+        logDebug "Switch event ignored: No trigger condition configured for ${deviceName} (Setting: ${settingName})"
+        return // Exit if no configuration found for this specific switch
+    }
+
+    logDebug "Device ${deviceName}: Event='${eventValue}', Configured Trigger='${configuredTrigger}'"
+
+    // Check if the event value matches the configured trigger condition (case-insensitive)
+    if (eventValue.equalsIgnoreCase(configuredTrigger)) {
+        log.info "Trigger condition met for ${deviceName}: Event '${eventValue}' matches configured '${configuredTrigger}'"
+        state.lastTriggerDevice = deviceId
+        startAlert("Switch ${deviceName} turned ${eventValue}") // Use eventValue in reason
     } else {
-        // This shouldn't happen if subscribed only to 'switch.on', but log just in case
-        logDebug "Switch event ignored (value not 'on'): ${evt.value}"
+        // Log if the event occurred but didn't match the configured trigger (e.g., switch turned ON but configured for OFF)
+        logDebug "Switch event ignored: Event '${eventValue}' does not match configured trigger '${configuredTrigger}' for ${deviceName}"
     }
 }
 // Handles sensor 'detected' events for trigger sensors
