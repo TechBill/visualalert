@@ -1110,7 +1110,7 @@ private void restoreDeviceAttributes(device, Map attrs) {
 def getPatternInfo(String type = null) {
     def patternTypeToUse = type ?: settings.patternType ?: "Simple Flash" // Use settings.patternType
     // Use the value from the input field directly. Default to 1 if null or invalid.
-    def repeatCountInput = settings.repeatCount != null ? settings.repeatCount.toInteger() : 1
+    def repeatCountInput = settings.repeatCount != null ? settings.repeatCount.toInteger() : 5 // Default to 5 if setting is null
     // Determine if infinite based on repeatCount being 0
     def isInfinite = (repeatCountInput == 0)
     // Use 1 for loop checks if infinite, otherwise use the input value
