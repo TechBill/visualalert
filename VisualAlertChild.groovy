@@ -7,7 +7,7 @@
  *  Copyright 2024
  *  Licensed under the Apache License, Version 2.0
  *
- *  Version: 1.1.3
+ *  Version: 1.1.5
  */
 
 definition(
@@ -171,8 +171,18 @@ input "motionSensors", "capability.motionSensor",
                 title: "Disable Alert with Switch?",
                 required: false,
                 multiple: false, // Only allow one switch for this
-                submitOnChange: true,
-                description: "Optional: Select a switch. When ON, this alert will be disabled."
+                submitOnChange: true, // Ensure this is true to show the next input dynamically
+                description: "Optional: Select a switch to enable/disable this alert."
+
+            // Dynamic input for ON/OFF condition for the disable switch
+            if (disableSwitch) {
+                input "disableCondition", "enum",
+                    title: "Disable When Switch Is",
+                    options: ["ON", "OFF"],
+                    required: true,
+                    defaultValue: "ON",
+                    description: "Disable the alert when the selected switch turns ON or OFF?"
+            }
 
             if (stopButtonDevices) {
                 // Generate button options
@@ -466,9 +476,16 @@ def initialize() {
     state.restorePreviousEnabled = (settings.restorePrevious as Boolean) ?: true // Default to true if null
     logDebug "initialize: Stored restorePreviousEnabled in state: ${state.restorePreviousEnabled}"
 
-    // Initialize disabled state based on disableSwitch
-    state.isDisabled = (disableSwitch?.currentValue("switch") == "on")
-    logDebug "initialize: Initial isDisabled state: ${state.isDisabled}"
+    // Initialize disabled state based on disableSwitch and disableCondition
+    if (disableSwitch) {
+        def conditionToDisable = settings.disableCondition ?: "ON" // Default to ON
+        def currentSwitchValue = disableSwitch.currentValue("switch")
+        state.isDisabled = currentSwitchValue?.equalsIgnoreCase(conditionToDisable) ?: false // Be safe if current value is null
+        logDebug "initialize: Disable switch selected. Condition='${conditionToDisable}', CurrentValue='${currentSwitchValue}'. Initial isDisabled state: ${state.isDisabled}"
+    } else {
+        state.isDisabled = false // No disable switch selected
+        logDebug "initialize: No disable switch selected. Initial isDisabled state: false"
+    }
 
     // Subscribe to events
     subscribeToEvents()
@@ -570,14 +587,31 @@ logDebug "Subscribed to all event sources"
 
 // Handler for the disable switch
 def disableSwitchHandler(evt) {
-    logDebug "disableSwitchHandler called with event: ${evt.value}"
-    if (evt.value == "on") {
-        state.isDisabled = true
-        logDebug "Alerts disabled by switch: ${evt.displayName}"
-        // Optionally, turn off any active alerts immediately
-        stopAlert()
+    logDebug "disableSwitchHandler called with event: ${evt.value} from ${evt.displayName}"
+
+    // Get the configured condition ("ON" or "OFF", default to "ON" if somehow not set)
+    def conditionToDisable = settings.disableCondition ?: "ON"
+    def eventValue = evt.value // "on" or "off"
+
+    logDebug "Checking event '${eventValue}' against disable condition '${conditionToDisable}'"
+
+    // Check if the current event value matches the condition that should disable the alert
+    if (eventValue.equalsIgnoreCase(conditionToDisable)) {
+        if (!state.isDisabled) { // Only log and stop if changing state to disabled
+            state.isDisabled = true
+            logDebug "Alerts DISABLED because ${evt.displayName} turned ${eventValue} (matches condition '${conditionToDisable}')"
+            // Stop any active alert immediately when disabled
+            stopAlertImmediate(reason: "disabled by switch ${evt.displayName}")
+        } else {
+            logDebug "Alerts remain disabled (switch ${evt.displayName} is ${eventValue})"
+        }
     } else {
-        state.isDisabled = false
+        if (state.isDisabled) { // Only log if changing state to enabled
+            state.isDisabled = false
+            logDebug "Alerts ENABLED because ${evt.displayName} turned ${eventValue} (does not match condition '${conditionToDisable}')"
+        } else {
+            logDebug "Alerts remain enabled (switch ${evt.displayName} is ${eventValue})"
+        }
         logDebug "Alerts enabled by switch: ${evt.displayName}"
     }
 }
