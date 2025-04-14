@@ -7,8 +7,11 @@
  *  Copyright 2024
  *  Licensed under the Apache License, Version 2.0
  *
- *  Version: 1.1.5
+ *  Version: 1.2.0
  */
+
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 
 definition(
     name: "VisualAlert Child",
@@ -265,7 +268,7 @@ String getPatternDescription(String patternType) {
         case "Standby": // New
             return "<b>Standby:</b> Device stays on for 3 seconds, then off for 3 seconds. Repeats based on 'Number of Repeats'."
         case "Custom":
-            return "<b>Custom:</b> Define your own flash duration and pause between flashes. Repeats based on 'Number of Repeats'."
+            return "<b>Custom:</b> Define a sequence of ON and OFF steps with durations in milliseconds (e.g., ON:1000, OFF:500, ON:200). Repeats based on 'Number of Repeats'."
         default:
             return "Select a pattern type."
     }
@@ -308,19 +311,25 @@ def patternPage() {
                 range: "0..100", // Limit to 100 repeats (adjust if needed)
                 description: "Applies to all pattern types. 0 means the pattern repeats until stopped."
 
-            if (patternType == "Custom") { // Only show duration inputs for Custom pattern
-                 paragraph "<b>Custom Timing Settings</b>" // Added header for clarity
-                 input "flashDuration", "number",
-                    title: "Flash ON Duration (milliseconds)", // Changed title
+            if (patternType == "Custom") { // Only show sequence input for Custom pattern
+                 paragraph "<b>Custom Sequence Definition</b>"
+                 input "customPatternSequence", "textArea", // Changed to textArea
+                    title: "Custom ON/OFF Sequence",
                     required: true,
-                    defaultValue: 1000, // Changed default
-                    description: "Enter duration in milliseconds (e.g., 1500)." // Changed description
+                    defaultValue: "ON:1000, OFF:1000", // Default to a simple flash
+                    description: "Define the custom alert sequence here." // Shortened description
 
-                 input "pauseDuration", "number",
-                    title: "Flash OFF Duration (milliseconds)", // Changed title
-                    required: true,
-                    defaultValue: 1000, // Changed default
-                    description: "Enter duration in milliseconds (e.g., 1500)." // Changed description
+                 // Add detailed instructions paragraph below the input
+                 paragraph """<small><b>Instructions:</b><br>
+                 • Enter a comma-separated list of ON and OFF steps.<br>
+                 • Each step must be in the format <code>STATE:DURATION</code> (e.g., <code>ON:1000</code> or <code>OFF:500</code>).<br>
+                 • <code>STATE</code> must be either <code>ON</code> or <code>OFF</code> (case-insensitive).<br>
+                 • <code>DURATION</code> is the time in <b>milliseconds</b> (e.g., 1000ms = 1 second).<br>
+                 • Do not include spaces within or immediately around the commas.<br>
+                 <b>Example 1 (Simple Flash):</b> <code>ON:1000,OFF:1000</code><br>
+                 <b>Example 2 (Quick Double Flash):</b> <code>ON:200,OFF:200,ON:200,OFF:1000</code><br>
+                 <!-- Example 3 Removed -->
+                 </small>"""
             }
         }
 
@@ -638,8 +647,11 @@ def buttonHandler(evt) {
 
     // First check if this is a stop button
     if (selectedStopButtonsList?.contains(buttonToCheck)) {
-        log.info "Stop button match found! Button: ${buttonToCheck}"
-        stopAlertImmediate(reason: "Stop button pressed: ${evt.device.displayName} Button ${evt.value}")
+        log.info "Stop button match found! Button: ${buttonToCheck}. Setting flags."
+        atomicState.runLoop = false // Signal loop to stop
+        atomicState.stopRequested = true // Signal loop to handle restore
+        // Call stopAlertImmediate mainly for cleanup, indicate source
+        stopAlertImmediate(reason: "Stop button pressed: ${evt.device.displayName} Button ${evt.value}", fromButton: true)
         return
     }
 
@@ -667,8 +679,11 @@ def appButtonHandler(btn) {
             break
 
         case "btnStopTest":
-            logDebug "Stop Test button pressed - stopping alert"
-            stopAlertImmediate(reason: "Stop Test button pressed")
+            logDebug "Stop Test button pressed - setting flags and calling stopAlertImmediate"
+            atomicState.runLoop = false // Signal loop to stop
+            atomicState.stopRequested = true // Signal loop to handle restore
+            // Call stopAlertImmediate mainly for cleanup, indicate source
+            stopAlertImmediate(reason: "Stop Test button pressed", fromButton: true)
             break
 
         default:
@@ -834,6 +849,7 @@ def startAlert(reason, emergency = false) {
     // --- Set Initial Alert State ---
     state.isAlertRunning = true
     atomicState.runLoop = true // Allow pattern loops to run
+    atomicState.stopRequested = false // Reset stop requested flag
     state.alertStart = now()
     state.alertReason = reason
     unschedule() // Clear any previous timeout or repeat schedules
@@ -841,10 +857,10 @@ def startAlert(reason, emergency = false) {
     // Save current device states if restoration is enabled (using value stored in state)
     logDebug "startAlert: Checking restorePreviousEnabled state value: ${state.restorePreviousEnabled}"
     if (state.restorePreviousEnabled) {
-        saveDeviceStates() // Saves to state.previousStates
+        saveDeviceStates() // Call directly, now saves JSON to atomicState.previousStatesJson
     } else {
         logDebug "startAlert: Not saving device states as restorePreviousEnabled is false/null."
-        state.previousStates = [:] // Clear previous states if not restoring
+        atomicState.previousStatesJson = null // Clear atomic state JSON string if not restoring
     }
 
     // --- Execute Pattern ---
@@ -922,6 +938,7 @@ def stopAlertImmediate(evtOrParams = null) {
     def reason = data.reason ?: params.reason ?: "manual stop"
     // Default sendNotify differently depending on source? Let's default to true unless specified false.
     boolean sendNotify = data.get("sendNotify", params.get("sendNotify", true))
+    boolean fromButton = params.fromButton ?: false // Check if called from button handler
 
     log.info "Stopping alert immediately (stopAlertImmediate): ${reason}"
 
@@ -937,27 +954,52 @@ def stopAlertImmediate(evtOrParams = null) {
     boolean wasAlertRunning = state.isAlertRunning
     // wasPreviewRunning variable removed
 
-    if (!wasAlertRunning) {
-        logDebug "Alert not running when stopAlertImmediate called, ignoring stop actions."
-        return
-    }
+    // Removed the check: if (!wasAlertRunning) { ... return }
+    // Now, always proceed with stop actions, relying on restoreDeviceStates
+    // and other functions to handle potentially empty states gracefully.
+    logDebug "Proceeding with stop actions regardless of initial wasAlertRunning state read here."
 
     // --- Restore State (if needed) ---
     // This now happens BEFORE marking the state as stopped
-    if (shouldRestore) {
+    // Only perform restore here if NOT called from the button handler
+    // (The button handler delegates restore to executeDevicePattern)
+    if (shouldRestore && !fromButton) {
         logDebug "stopAlertImmediate: Restore is enabled, proceeding with restore."
         // Restore from the alert's previous state map
-        if (wasAlertRunning && state.previousStates && !state.previousStates.isEmpty()) {
-            logDebug("Restoring from alert's previousStates")
-            restoreDeviceStates(state.previousStates) // Restore from alert state
+        // Restore from JSON string stored in atomicState.previousStatesJson
+        String previousStatesJson = atomicState.previousStatesJson
+        if (previousStatesJson) {
+            logDebug("Found previousStatesJson: ${previousStatesJson}")
+            try {
+                Map statesToRestoreMap = new JsonSlurper().parseText(previousStatesJson)
+                if (statesToRestoreMap && !statesToRestoreMap.isEmpty()) {
+                    logDebug("Successfully parsed JSON to map. Attempting restore.")
+                    restoreDeviceStates(statesToRestoreMap)
+                } else {
+                    log.warn("Parsed JSON map is empty or null. Turning devices off.")
+                    devices?.off()
+                    atomicState.previousStatesJson = null // Clear invalid state
+                }
+            } catch (Exception e) {
+                log.error("Error parsing previousStatesJson: ${e.message}. Turning devices off.")
+                devices?.off()
+                atomicState.previousStatesJson = null // Clear invalid state
+            }
         } else {
-            logDebug("No previous states found for running alert, turning devices off.")
+            // This case is hit if atomicState.previousStatesJson is empty/null
+            logDebug("atomicState.previousStatesJson is empty or null. Turning devices off.")
             devices?.off()
         }
-    } else {
-        // If not restoring, ensure devices are turned off
-        logDebug "Not restoring previous state (restorePreviousEnabled is false/null), turning devices off."
-        devices?.off()
+    } else if (!shouldRestore) {
+        // If restore is disabled, ensure devices are off (unless called from button, where executeDevicePattern handles it)
+        if (!fromButton) {
+             logDebug "Restore disabled and not called from button, turning devices off."
+             devices?.off()
+        } else {
+             logDebug "Restore disabled, called from button. executeDevicePattern will handle final state."
+        }
+    } else { // shouldRestore is true BUT fromButton is true
+         logDebug "Restore enabled, called from button. executeDevicePattern will handle restore."
     }
 
     // --- Final State Update & Cleanup ---
@@ -982,10 +1024,11 @@ def stopAlertImmediate(evtOrParams = null) {
 
 // --- State Management ---
 
-// Saves current device states before starting an alert
-def saveDeviceStates() {
+// Saves current device states before starting an alert and returns the map
+void saveDeviceStates() {
     log.info "Saving device states before alert"
-    state.previousStates = [:] // Clear any old states first
+    Map tempStates = [:] // Use a temporary map again
+    atomicState.previousStatesJson = null // Clear previous JSON string
 
     devices.each { device ->
         try {
@@ -1009,23 +1052,33 @@ def saveDeviceStates() {
                 colorTemperature: currentCT
             ]
 
-            state.previousStates[device.id.toString()] = stateObj
-            logDebug "Saved initial state for ${device.displayName}: ${stateObj}"
+            tempStates[device.id.toString()] = stateObj // Save to temporary map
+            logDebug "Saved initial state for ${device.displayName} to temp map: ${stateObj}"
         } catch (e) {
             log.error "Error saving state for ${device.displayName}: ${e.message}"
         }
     }
-    logDebug "Finished saving device states. Count: ${state.previousStates?.size() ?: 0}. States: ${state.previousStates}"
+    try {
+        atomicState.previousStatesJson = JsonOutput.toJson(tempStates) // Convert map to JSON and store in atomicState
+        logDebug "Finished saving device states as JSON to atomicState.previousStatesJson. Count: ${tempStates?.size() ?: 0}. JSON: ${atomicState.previousStatesJson}"
+    } catch (Exception e) {
+        log.error "Error converting device states map to JSON: ${e.message}"
+        atomicState.previousStatesJson = null // Ensure it's null on error
+    }
+    // Removed return statement
 }
 
 // Restores device states after an alert stops
 def restoreDeviceStates(Map statesToRestore) { // Now requires the map to restore from
+    // No longer need defensive copy as we get a new map from JSON parsing
     if (!statesToRestore || statesToRestore.isEmpty()) {
-        log.warn "restoreDeviceStates called but no states found to restore. Turning devices off."
+        log.warn "restoreDeviceStates called but no states found to restore (or map was empty). Turning devices off."
         devices?.off()
-        // Clear the specific map that was passed (or intended to be passed)
-        if (statesToRestore == state.previousStates) state.previousStates = [:]
-        // Preview-related map clearing removed
+        // Clear atomicState JSON even if restore failed/wasn't needed
+        atomicState.previousStatesJson = null
+        // Clear both state maps after attempting restore
+        state.previousStates = [:]
+        state.currentAlertStates = null
         return
     }
 
@@ -1044,7 +1097,7 @@ def restoreDeviceStates(Map statesToRestore) { // Now requires the map to restor
     // Now restore previous states
     devices.each { device ->
         def deviceIdStr = device.id.toString()
-        def prevState = statesToRestore[deviceIdStr]
+        def prevState = statesToRestore[deviceIdStr] // Use the map directly
 
         if (prevState) {
             logDebug "Attempting to restore ${device.displayName} to previous state: ${prevState}"
@@ -1083,9 +1136,8 @@ def restoreDeviceStates(Map statesToRestore) { // Now requires the map to restor
         }
     }
 
-    // Clear the specific map used for restoration after attempting restore
-    if (statesToRestore == state.previousStates) state.previousStates = [:]
-    // Preview-related map clearing removed
+    // Clear atomicState JSON after attempting restore
+    atomicState.previousStatesJson = null
     logDebug "Finished restoring device states."
 
     // Schedule a final check (optional, good for Z-Wave) - Commented out as it causes errors and restore seems to work
@@ -1190,14 +1242,45 @@ def getPatternInfo(String type = null) {
             // info.repeatCount is set above from input
             break
         case "Custom":
-            // Removed flashCount dependency
-            def onDurationSetting = settings.flashDuration
-            def offDurationSetting = settings.pauseDuration
-            def onDurationMs = onDurationSetting ?: 1000 // Use setting directly, default to 1000ms if null
-            def offDurationMs = offDurationSetting ?: 1000 // Use setting directly, default to 1000ms if null
-            info.commands = [
-                [on: true, duration: onDurationMs], [on: false, duration: offDurationMs]
-            ]
+            info.commands = [] // Initialize empty command list
+            def sequenceString = settings.customPatternSequence ?: "ON:1000,OFF:1000" // Get sequence from settings, default if null/empty
+            logDebug "Parsing custom sequence: ${sequenceString}"
+            try {
+                sequenceString.split(',').each { step ->
+                    step = step.trim() // Remove leading/trailing whitespace
+                    if (step) { // Ensure step is not empty after trimming
+                        def parts = step.split(':')
+                        if (parts.size() == 2) {
+                            def stateStr = parts[0].trim().toUpperCase()
+                            def durationStr = parts[1].trim()
+                            boolean onState = (stateStr == "ON")
+                            long durationMs = durationStr.toLong() // Convert duration to long
+
+                            if (durationMs <= 0) {
+                                log.warn "Custom pattern step '${step}' has invalid duration (${durationMs}ms). Skipping."
+                            } else if (stateStr != "ON" && stateStr != "OFF") {
+                                log.warn "Custom pattern step '${step}' has invalid state ('${parts[0]}'). Skipping."
+                            } else {
+                                info.commands << [on: onState, duration: durationMs]
+                            }
+                        } else {
+                            log.warn "Custom pattern step '${step}' has incorrect format (expected STATE:ms). Skipping."
+                        }
+                    }
+                }
+            } catch (NumberFormatException e) {
+                log.error "Error parsing custom pattern duration in sequence '${sequenceString}': ${e.message}. Defaulting pattern."
+                info.commands = [[on: true, duration: 1000], [on: false, duration: 1000]] // Default on error
+            } catch (Exception e) {
+                log.error "Error parsing custom pattern sequence '${sequenceString}': ${e.message}. Defaulting pattern."
+                info.commands = [[on: true, duration: 1000], [on: false, duration: 1000]] // Default on error
+            }
+
+            // Ensure commands list is not empty after parsing
+            if (info.commands.isEmpty()) {
+                log.warn "Custom pattern sequence '${sequenceString}' resulted in empty command list. Defaulting pattern."
+                info.commands = [[on: true, duration: 1000], [on: false, duration: 1000]]
+            }
             // info.repeatCount and info.isInfinite are set above from input
             break
         case "Simple Flash":
@@ -1260,9 +1343,9 @@ def executeDevicePattern(device, Map patternInfo) {
         logDebug "Pattern loop iteration ${loopCounter + 1} for ${device.displayName}. runLoop: ${atomicState.runLoop}"
 
         for (cmd in commands) {
-            // Check stop flag before each command
-            if (!atomicState.runLoop) {
-                logDebug "Stop requested during pattern execution for ${device.displayName}"
+            // Check stop flags before each command
+            if (!atomicState.runLoop || atomicState.stopRequested) {
+                logDebug "Stop requested (runLoop=${atomicState.runLoop}, stopRequested=${atomicState.stopRequested}) during pattern execution for ${device.displayName}"
                 completedNormally = false
                 break // Exit inner command loop
             }
@@ -1337,7 +1420,8 @@ def executeDevicePattern(device, Map patternInfo) {
             }
         } // End command loop
 
-        if (!atomicState.runLoop || !completedNormally) {
+        // Check stop flags again before next loop iteration
+        if (!atomicState.runLoop || atomicState.stopRequested || !completedNormally) {
             break // Exit outer while loop if stopped or error
         }
         loopCounter++
@@ -1346,12 +1430,83 @@ def executeDevicePattern(device, Map patternInfo) {
     logDebug "Pattern loop finished for ${device.displayName}. Completed Normally: ${completedNormally}, Infinite: ${isInfinite}"
 
     // --- Final State & Cleanup ---
-    // If the pattern completed normally AND it's finite, schedule stopAlertImmediate to handle cleanup/restore
-    if (completedNormally && !isInfinite) {
-        logDebug "Finite pattern completed normally, scheduling stopAlertImmediate via runIn to restore/cleanup."
-        // Use string method name and pass params via data map
-        runIn(1, "stopAlertImmediate", [data: [reason: "pattern completed", sendNotify: true], overwrite: true])
+    // --- Final State & Cleanup ---
+    // Check if stop was requested via button
+    if (atomicState.stopRequested) {
+        logDebug "Stop was requested via button (atomicState.stopRequested=true). Attempting restore within executeDevicePattern."
+        boolean shouldRestore = state.restorePreviousEnabled ?: false
+        if (shouldRestore) {
+            // Restore using the JSON state
+            String previousStatesJson = atomicState.previousStatesJson
+            if (previousStatesJson) {
+                logDebug("Found previousStatesJson in executeDevicePattern: ${previousStatesJson}")
+                try {
+                    Map statesToRestoreMap = new JsonSlurper().parseText(previousStatesJson)
+                    if (statesToRestoreMap && !statesToRestoreMap.isEmpty()) {
+                        logDebug("Successfully parsed JSON. Calling restoreDeviceStates.")
+                        restoreDeviceStates(statesToRestoreMap)
+                    } else {
+                        log.warn("Parsed JSON map is empty or null in executeDevicePattern. Turning devices off.")
+                        devices?.off() // Turn off if restore data is bad
+                        atomicState.previousStatesJson = null // Clear invalid state
+                    }
+                } catch (Exception e) {
+                    log.error("Error parsing previousStatesJson in executeDevicePattern: ${e.message}. Turning devices off.")
+                    devices?.off() // Turn off on error
+                    atomicState.previousStatesJson = null // Clear invalid state
+                }
+            } else {
+                logDebug("atomicState.previousStatesJson is empty/null in executeDevicePattern. Turning devices off.")
+                devices?.off() // Turn off if no state saved
+            }
+        } else {
+            logDebug "Restore disabled, turning devices off within executeDevicePattern."
+            devices?.off() // Ensure devices are off if restore is disabled
+        }
+        // Reset the flag after handling
+        atomicState.stopRequested = false
     }
+    // Case: Pattern completed normally, is finite, and wasn't stopped by button
+    else if (completedNormally && !isInfinite) {
+        logDebug "Finite pattern completed normally (stopRequested=false). Attempting restore within executeDevicePattern."
+        boolean shouldRestore = state.restorePreviousEnabled ?: false
+        if (shouldRestore) {
+            // Restore using the JSON state
+            String previousStatesJson = atomicState.previousStatesJson
+            if (previousStatesJson) {
+                logDebug("Found previousStatesJson in executeDevicePattern (normal completion): ${previousStatesJson}")
+                try {
+                    Map statesToRestoreMap = new JsonSlurper().parseText(previousStatesJson)
+                    if (statesToRestoreMap && !statesToRestoreMap.isEmpty()) {
+                        logDebug("Successfully parsed JSON. Calling restoreDeviceStates.")
+                        restoreDeviceStates(statesToRestoreMap)
+                    } else {
+                        log.warn("Parsed JSON map is empty or null in executeDevicePattern (normal completion). Turning devices off.")
+                        devices?.off() // Turn off if restore data is bad
+                        atomicState.previousStatesJson = null // Clear invalid state
+                    }
+                } catch (Exception e) {
+                    log.error("Error parsing previousStatesJson in executeDevicePattern (normal completion): ${e.message}. Turning devices off.")
+                    devices?.off() // Turn off on error
+                    atomicState.previousStatesJson = null // Clear invalid state
+                }
+            } else {
+                logDebug("atomicState.previousStatesJson is empty/null in executeDevicePattern (normal completion). Turning devices off.")
+                devices?.off() // Turn off if no state saved
+            }
+        } else {
+            logDebug "Restore disabled, turning devices off within executeDevicePattern (normal completion)."
+            devices?.off() // Ensure devices are off if restore is disabled
+        }
+    }
+    // Case: Pattern is infinite, or completed abnormally, or was stopped by other means
+    else {
+         logDebug "Pattern finished abnormally, is infinite, or was stopped by other means (stopRequested=false)."
+         // Infinite patterns rely on timeout or manual stop.
+         // Abnormal completion leaves devices in last state before error.
+         // If restore is disabled, devices should be off already or turned off by stopAlertImmediate/stopAlert.
+    }
+    // Removed extra closing brace
     // If pattern was stopped early (!completedNormally), the stop function was already called.
     // If pattern is infinite, it relies on timeout or manual stop.
 }
