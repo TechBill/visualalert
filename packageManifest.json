@@ -1,9 +1,9 @@
 {
   "packageName": "VisualAlert",
   "author": "Bill Fleming",
-  "version": "1.2.0",
+  "version": "1.2.5",
   "minimumHEVersion": "2.2.8",
-  "dateReleased": "2025-04-13",
+  "dateReleased": "2025-04-14",
   "apps": [
     {
       "id": "3e18f903-7057-4c79-8ced-1139ade28808",

@@ -7,7 +7,7 @@
  *  Copyright 2024
  *  Licensed under the Apache License, Version 2.0
  *
- *  Version: 1.2.0
+ *  Version: 1.2.5
  */
 
 import groovy.json.JsonOutput
@@ -466,7 +466,8 @@ def updated() {
     logDebug "VisualAlert Child updated"
     app.updateLabel(alertName ?: "New Alert")
     unsubscribe()
-    unschedule() // Ensure no old schedules persist
+    unschedule() // Ensure no old schedules persist (clears finalCleanupAndRestore, processAlertDevices etc.)
+    unschedule("executeDevicePattern") // Explicitly clear old handler name
     initialize()
 }
 
@@ -477,8 +478,8 @@ def initialize() {
     state.isAlertRunning = false // Use this flag for active alert state
     // isPreviewRunning state variable removed
     state.lastTriggerDevice = null
-    atomicState.runLoop = false // Controls pattern execution loops
-    state.previousStates = [:] // Store device states before alert
+    // atomicState.runLoop = false // Removed
+    state.previousStates = [:] // Store device states before alert (No longer used for restore, but kept for reference?)
     // previewStates state variable removed
 
     // Store restorePrevious setting in state for reliable access (read via settings map)
@@ -498,6 +499,7 @@ def initialize() {
 
     // Subscribe to events
     subscribeToEvents()
+    unschedule("executeDevicePattern") // Explicitly clear old handler name during init too
 
     // Subscribe to app button events (Test/Stop Test buttons)
     subscribe(app, "buttonPressed", "appButtonHandler") // Re-enabled for Test button
@@ -648,8 +650,8 @@ def buttonHandler(evt) {
     // First check if this is a stop button
     if (selectedStopButtonsList?.contains(buttonToCheck)) {
         log.info "Stop button match found! Button: ${buttonToCheck}. Setting flags."
-        atomicState.runLoop = false // Signal loop to stop
-        atomicState.stopRequested = true // Signal loop to handle restore
+        // atomicState.runLoop = false // Removed
+        // atomicState.stopRequested = true // Removed
         // Call stopAlertImmediate mainly for cleanup, indicate source
         stopAlertImmediate(reason: "Stop button pressed: ${evt.device.displayName} Button ${evt.value}", fromButton: true)
         return
@@ -680,8 +682,8 @@ def appButtonHandler(btn) {
 
         case "btnStopTest":
             logDebug "Stop Test button pressed - setting flags and calling stopAlertImmediate"
-            atomicState.runLoop = false // Signal loop to stop
-            atomicState.stopRequested = true // Signal loop to handle restore
+            // atomicState.runLoop = false // Removed
+            // atomicState.stopRequested = true // Removed
             // Call stopAlertImmediate mainly for cleanup, indicate source
             stopAlertImmediate(reason: "Stop Test button pressed", fromButton: true)
             break
@@ -848,11 +850,11 @@ def startAlert(reason, emergency = false) {
 
     // --- Set Initial Alert State ---
     state.isAlertRunning = true
-    atomicState.runLoop = true // Allow pattern loops to run
-    atomicState.stopRequested = false // Reset stop requested flag
+    // atomicState.runLoop = true // Removed, using state.isAlertRunning
     state.alertStart = now()
     state.alertReason = reason
     unschedule() // Clear any previous timeout or repeat schedules
+    // atomicState.activePatternRuns = 0 // Removed counter logic
 
     // Save current device states if restoration is enabled (using value stored in state)
     logDebug "startAlert: Checking restorePreviousEnabled state value: ${state.restorePreviousEnabled}"
@@ -869,179 +871,201 @@ def startAlert(reason, emergency = false) {
     // No need to pass restorePrevious in patternInfo anymore
 
     logDebug "Running pattern: ${patternInfo.type}"
-    devices.each { device ->
-        executeDevicePattern(device, patternInfo)
-    }
+    // Store consolidated pattern parameters in a single atomicState key
+    def patternParamsMap = [
+        commands: patternInfo.commands ?: [],
+        repeatCount: patternInfo.repeatCount,
+        isInfinite: patternInfo.isInfinite,
+        colorMap: patternInfo.colorMap,
+        level: patternInfo.level,
+        offLevel: patternInfo.offLevel,
+        patternType: patternInfo.type
+    ]
+    String patternParamsJson = JsonOutput.toJson(patternParamsMap)
+    atomicState.currentPatternParamsJson = patternParamsJson
+    logDebug "Stored consolidated pattern data in atomicState.currentPatternParamsJson"
 
-    // --- Notifications & Timeout/Completion ---
+    // --- Schedule First Pattern Step ---
+    long startDelayMs = 200 // Short delay before starting processing
+    logDebug "Scheduling first processPatternStep in ${startDelayMs} ms"
+    // Schedule the first step (index 0, loop 0)
+    runInMillis(startDelayMs, "processPatternStep", [data: [stepIndex: 0, loopCounter: 0], overwrite: false])
+
+    // --- Notifications & Schedule Final Cleanup ---
     if (notifyStart) {
         sendNotification("VisualAlert: ${alertName} activated - ${reason}")
     }
 
-    // Set timeout only for infinite patterns
-    def effectiveTimeoutMinutes = timeout ?: 5 // Default to 5 minutes if not set
+    // Calculate total duration for finite patterns or use timeout for infinite (PARALLEL execution)
+    def cleanupDelaySeconds
     if (patternInfo.isInfinite) {
+        def effectiveTimeoutMinutes = timeout ?: 5 // Default to 5 minutes if not set
         if (effectiveTimeoutMinutes > 0) {
-            logDebug "Pattern is indefinite, setting timeout for ${effectiveTimeoutMinutes} minutes."
-            def timeoutSeconds = effectiveTimeoutMinutes * 60
-            runIn(timeoutSeconds, stopAlert, [data: [reason: "timeout"]])
+            cleanupDelaySeconds = effectiveTimeoutMinutes * 60
+            logDebug "Pattern is indefinite, scheduling final cleanup/restore in ${cleanupDelaySeconds} seconds (timeout)."
         } else {
-            logDebug "Pattern is indefinite and timeout is 0 or less, alert will run until stopped manually."
+            cleanupDelaySeconds = -1 // Indicates no scheduled cleanup for infinite without timeout
+            logDebug "Pattern is indefinite and timeout is 0, alert will run until stopped manually. No cleanup scheduled."
         }
+    } else {
+        // Calculate total duration for ONE pattern loop running in PARALLEL
+        long loopDurationMs = patternInfo.commands.sum { it.duration ?: 0 }
+        long totalPatternMs = loopDurationMs * patternInfo.repeatCount
+        // Add a buffer (e.g., 5 seconds overall) for overhead and potential delays
+        long bufferMs = 5000
+        cleanupDelaySeconds = ((totalPatternMs + bufferMs) / 1000)
+        logDebug "Pattern is finite (${patternInfo.repeatCount} repeats). Scheduling final cleanup/restore in ${cleanupDelaySeconds} seconds (parallel execution)."
     }
-    // Finite patterns will now schedule their own stop/restore via executeDevicePattern
+
+    // Schedule the final cleanup if a delay was determined (for both finite and infinite with timeout)
+    if (cleanupDelaySeconds > 0) {
+        logDebug "Scheduling finalCleanupAndRestore in ${cleanupDelaySeconds} seconds. Reason: ${patternInfo.isInfinite ? 'timeout' : 'pattern completed'}"
+        runIn(cleanupDelaySeconds.toInteger(), "finalCleanupAndRestore", [data: [reason: patternInfo.isInfinite ? "timeout" : "pattern completed"], overwrite: true])
+    }
 }
 
-// Stops the alert due to timeout
-def stopAlert(data) {
-    def reason = data?.reason ?: "timeout"
-    log.info "Stopping alert (stopAlert due to ${reason})"
+// Central function for cleanup and restoration, called by runIn or stop handlers
+def finalCleanupAndRestore(data) {
+    def reason = data?.reason ?: "unknown completion"
+    log.info "Final cleanup and restore initiated due to: ${reason}"
 
+    // Check if alert is still considered running (might have been stopped manually already)
     if (!state.isAlertRunning) {
-        logDebug "Alert already stopped, ignoring stopAlert call."
+        logDebug "Alert already stopped, ignoring scheduled finalCleanupAndRestore call."
+        // Ensure any lingering schedule is cancelled just in case
+        unschedule("finalCleanupAndRestore")
         return
     }
 
     // --- Stop Pattern & Restore State ---
-    unschedule() // Clear any remaining schedules
-    atomicState.runLoop = false // Signal pattern loops to stop
-    state.isAlertRunning = false // Mark alert as stopped
+    // Set running flag false FIRST to signal loops
+    state.isAlertRunning = false
+    logDebug "finalCleanupAndRestore: Set state.isAlertRunning to false"
+    // atomicState.runLoop = false // Removed
+    unschedule("processPatternStep") // Cancel any pending steps
+    boolean shouldRestore = state.restorePreviousEnabled ?: false
+    logDebug "finalCleanupAndRestore: Checking restorePreviousEnabled state value: ${shouldRestore}"
 
-    // Restore previous states if needed (using value stored in state)
-    logDebug "stopAlert: Checking restorePreviousEnabled state value: ${state.restorePreviousEnabled}"
-    if (state.restorePreviousEnabled) {
-        restoreDeviceStates(state.previousStates) // Explicitly pass alert states
+    if (shouldRestore) {
+        String previousStatesJson = atomicState.previousStatesJson
+        if (previousStatesJson) {
+            logDebug("finalCleanupAndRestore: Found previousStatesJson: ${previousStatesJson}")
+            try {
+                Map statesToRestoreMap = new JsonSlurper().parseText(previousStatesJson)
+                if (statesToRestoreMap && !statesToRestoreMap.isEmpty()) {
+                    logDebug("finalCleanupAndRestore: Successfully parsed JSON. Calling restoreDeviceStates.")
+                    restoreDeviceStates(statesToRestoreMap) // Restore from JSON map
+                } else {
+                    log.warn("finalCleanupAndRestore: Parsed JSON map is empty or null. Turning devices off.")
+                    devices?.off()
+                    atomicState.previousStatesJson = null // Clear invalid state
+                }
+            } catch (Exception e) {
+                log.error("finalCleanupAndRestore: Error parsing previousStatesJson: ${e.message}. Turning devices off.")
+                devices?.off()
+                atomicState.previousStatesJson = null // Clear invalid state
+            }
+        } else {
+            logDebug("finalCleanupAndRestore: atomicState.previousStatesJson is empty/null. Turning devices off.")
+            devices?.off()
+        }
     } else {
         // If not restoring, ensure devices are turned off
-        logDebug "Not restoring previous state, turning devices off."
+        logDebug "finalCleanupAndRestore: Restore disabled, turning devices off."
         devices?.off()
     }
 
     // --- Notifications ---
     if (notifyEnd) {
-        sendNotification("VisualAlert: ${alertName} deactivated - ${reason}")
+        // Use the original alert reason if available, otherwise the cleanup reason
+        def notifyReason = state.alertReason ?: reason
+        sendNotification("VisualAlert: ${alertName} deactivated - ${notifyReason}")
     }
 
-    // Clean up state
+    // --- Final State Cleanup ---
+    logDebug "Final cleanup: Clearing state variables."
     state.lastTriggerDevice = null
     state.alertStart = null
     state.alertReason = null
-    // state.previousStates is cleared by restoreDeviceStates
+    atomicState.previousStatesJson = null // Ensure JSON is cleared after use/attempt
+    atomicState.currentPatternParamsJson = null // Clean up pattern params
 }
 
-// Stops the alert immediately. Can be called directly (params map) or via runIn (data map)
+// Stops the alert due to external trigger (e.g., timeout handled by runIn calling finalCleanupAndRestore)
+def stopAlert(data) {
+    // This handler is now primarily for the timeout case scheduled by startAlert
+    // It should just call the central cleanup function
+    logDebug("stopAlert called (likely timeout), unscheduling and calling finalCleanupAndRestore.")
+    unschedule("finalCleanupAndRestore") // Prevent duplicate execution
+    finalCleanupAndRestore(data) // Pass the reason ("timeout")
+}
+
+// Stops the alert immediately (e.g., manual stop button, new alert starting)
 def stopAlertImmediate(evtOrParams = null) {
     // Determine if called by runIn (evtOrParams will have a 'data' key) or directly
     def params = evtOrParams instanceof Map ? evtOrParams : [:]
     def data = evtOrParams?.data instanceof Map ? evtOrParams.data : [:]
 
     def reason = data.reason ?: params.reason ?: "manual stop"
-    // Default sendNotify differently depending on source? Let's default to true unless specified false.
-    boolean sendNotify = data.get("sendNotify", params.get("sendNotify", true))
-    boolean fromButton = params.fromButton ?: false // Check if called from button handler
+    // Notification sending is now handled solely within finalCleanupAndRestore
+    // boolean sendNotify = data.get("sendNotify", params.get("sendNotify", true)) // Removed
 
     log.info "Stopping alert immediately (stopAlertImmediate): ${reason}"
 
-    // Signal pattern loops to stop *immediately*
-    atomicState.runLoop = false
-    logDebug "stopAlertImmediate: Set atomicState.runLoop to false"
-
-    // Determine if we need to restore based on state variable
-    boolean shouldRestore = state.restorePreviousEnabled ?: false
-    logDebug "stopAlertImmediate: Checking restorePreviousEnabled state value: ${shouldRestore}"
-
-    // Check if alert is running
-    boolean wasAlertRunning = state.isAlertRunning
-    // wasPreviewRunning variable removed
-
-    // Removed the check: if (!wasAlertRunning) { ... return }
-    // Now, always proceed with stop actions, relying on restoreDeviceStates
-    // and other functions to handle potentially empty states gracefully.
-    logDebug "Proceeding with stop actions regardless of initial wasAlertRunning state read here."
-
-    // --- Restore State (if needed) ---
-    // This now happens BEFORE marking the state as stopped
-    // Only perform restore here if NOT called from the button handler
-    // (The button handler delegates restore to executeDevicePattern)
-    if (shouldRestore && !fromButton) {
-        logDebug "stopAlertImmediate: Restore is enabled, proceeding with restore."
-        // Restore from the alert's previous state map
-        // Restore from JSON string stored in atomicState.previousStatesJson
-        String previousStatesJson = atomicState.previousStatesJson
-        if (previousStatesJson) {
-            logDebug("Found previousStatesJson: ${previousStatesJson}")
-            try {
-                Map statesToRestoreMap = new JsonSlurper().parseText(previousStatesJson)
-                if (statesToRestoreMap && !statesToRestoreMap.isEmpty()) {
-                    logDebug("Successfully parsed JSON to map. Attempting restore.")
-                    restoreDeviceStates(statesToRestoreMap)
-                } else {
-                    log.warn("Parsed JSON map is empty or null. Turning devices off.")
-                    devices?.off()
-                    atomicState.previousStatesJson = null // Clear invalid state
-                }
-            } catch (Exception e) {
-                log.error("Error parsing previousStatesJson: ${e.message}. Turning devices off.")
-                devices?.off()
-                atomicState.previousStatesJson = null // Clear invalid state
-            }
-        } else {
-            // This case is hit if atomicState.previousStatesJson is empty/null
-            logDebug("atomicState.previousStatesJson is empty or null. Turning devices off.")
-            devices?.off()
-        }
-    } else if (!shouldRestore) {
-        // If restore is disabled, ensure devices are off (unless called from button, where executeDevicePattern handles it)
-        if (!fromButton) {
-             logDebug "Restore disabled and not called from button, turning devices off."
-             devices?.off()
-        } else {
-             logDebug "Restore disabled, called from button. executeDevicePattern will handle final state."
-        }
-    } else { // shouldRestore is true BUT fromButton is true
-         logDebug "Restore enabled, called from button. executeDevicePattern will handle restore."
+    // Check if alert is actually running
+    if (!state.isAlertRunning) {
+        logDebug "Alert not running when stopAlertImmediate called, ignoring."
+        // Ensure any lingering cleanup schedule is cancelled
+        unschedule("finalCleanupAndRestore")
+        return
     }
 
-    // --- Final State Update & Cleanup ---
-    unschedule() // Clear any remaining schedules
-    state.isAlertRunning = false // Mark alert as stopped *after* restore attempt
-    // isPreviewRunning state update removed
-    logDebug "State flag isAlertRunning set to false."
+    // Signal loops to stop by setting the central flag FIRST
+    state.isAlertRunning = false
+    logDebug "stopAlertImmediate: Set state.isAlertRunning to false"
+    // atomicState.runLoop = false // Removed
+    unschedule("processPatternStep") // Cancel any pending steps FIRST
+    logDebug "stopAlertImmediate: Unscheduled any pending processPatternStep."
 
-    // --- Notifications ---
-    // Only send notification if an alert was running (not just preview) and requested
-    if (wasAlertRunning && notifyEnd && sendNotify) {
-        sendNotification("VisualAlert: ${alertName} deactivated - ${reason}")
-    }
+    // Cancel any scheduled final cleanup
+    unschedule("finalCleanupAndRestore")
+    logDebug "stopAlertImmediate: Unscheduled any pending finalCleanupAndRestore."
 
-    // Clean up other state variables
-    state.lastTriggerDevice = null
-    state.alertStart = null
-    state.alertReason = null
-    // state.previousStates is cleared by restoreDeviceStates
+    // Call the central cleanup function immediately
+    // Pass the reason, but notification decision is made inside finalCleanupAndRestore
+    finalCleanupAndRestore([reason: reason])
 }
 
 
 // --- State Management ---
 
-// Saves current device states before starting an alert and returns the map
+// Saves current device states before starting an alert and stores as JSON in atomicState
 void saveDeviceStates() {
     log.info "Saving device states before alert"
-    Map tempStates = [:] // Use a temporary map again
-    atomicState.previousStatesJson = null // Clear previous JSON string
+    Map tempStates = [:] // Use a temporary map
+    atomicState.previousStatesJson = null // Clear previous JSON string *before* loop
 
-    devices.each { device ->
+    settings.devices.each { device -> // Explicitly use settings.devices
         try {
-            def currentSwitch = device.currentValue("switch")
             def currentLevel = hasLevelCapability(device) ? device.currentValue("level") : null
             def currentHue = hasColorCapability(device) ? device.currentValue("hue") : null
             def currentSat = hasColorCapability(device) ? device.currentValue("saturation") : null
             def currentCT = hasColorTemperature(device) ? device.currentValue("colorTemperature") : null
 
-            // Ensure we have a valid switch state
-            if (currentSwitch != "on" && currentSwitch != "off") {
-                logWarn "Device ${device.displayName} reported invalid switch state '${currentSwitch}', assuming 'off'."
-                currentSwitch = "off"
+            // Determine switch state, considering level for capable devices
+            def currentSwitch
+            if (hasLevelCapability(device) && currentLevel != null && currentLevel > 0) {
+                // If level is > 0, consider it ON, even if switch reports off/null temporarily
+                currentSwitch = "on"
+                logDebug "Device ${device.displayName} has level ${currentLevel} > 0, considering switch state as 'on'."
+            } else {
+                // Otherwise, rely on the reported switch value
+                currentSwitch = device.currentValue("switch")
+                // Fallback for invalid reported switch state
+                if (currentSwitch != "on" && currentSwitch != "off") {
+                    logWarn "Device ${device.displayName} reported invalid switch state '${currentSwitch}', assuming 'off'."
+                    currentSwitch = "off"
+                }
             }
 
             def stateObj = [
@@ -1085,7 +1109,7 @@ def restoreDeviceStates(Map statesToRestore) { // Now requires the map to restor
     log.info "Restoring device states. Count: ${statesToRestore?.size() ?: 0}. States: ${statesToRestore}"
 
     // First, turn off all devices to ensure a clean state before restoring ON states
-    devices?.each { device ->
+    settings.devices?.each { device -> // Explicitly use settings.devices
         try {
             device.off()
         } catch (Exception e) {
@@ -1095,7 +1119,7 @@ def restoreDeviceStates(Map statesToRestore) { // Now requires the map to restor
     pauseExecution(1000) // Give devices time to settle
 
     // Now restore previous states
-    devices.each { device ->
+    settings.devices.each { device -> // Explicitly use settings.devices
         def deviceIdStr = device.id.toString()
         def prevState = statesToRestore[deviceIdStr] // Use the map directly
 
@@ -1153,7 +1177,9 @@ private void restoreDeviceAttributes(device, Map attrs) {
             device.setColorTemperature(attrs.colorTemperature)
             logDebug "Restored Color Temperature: ${attrs.colorTemperature}"
             pauseExecution(300)
-        } else if (attrs.hue != null && attrs.saturation != null && hasColorCapability(device)) {
+        }
+        // Restore Hue/Saturation if available (Remove 'else' to allow both CT and Color restore if needed)
+        if (attrs.hue != null && attrs.saturation != null && hasColorCapability(device)) {
             // Use setColor map for reliability if possible
             try {
                 def colorMap = [hue: attrs.hue, saturation: attrs.saturation]
@@ -1314,205 +1340,148 @@ def getPatternInfo(String type = null) {
     return info
 }
 
-// Executes a pattern sequence on a single device
-def executeDevicePattern(device, Map patternInfo) {
-    logDebug "Executing pattern ${patternInfo.type} on ${device.displayName}"
-    def commands = patternInfo.commands
-    def repeatCount = patternInfo.repeatCount // Number of loops (1 if infinite)
-    def isInfinite = patternInfo.isInfinite
-    def loopCounter = 0
-    boolean completedNormally = true // Assume completion unless stopped
+// New function to handle one step of the pattern for ALL devices
+def processPatternStep(data) {
+    int stepIndex = data.stepIndex ?: 0
+    int loopCounter = data.loopCounter ?: 0
 
-    // --- Prepare device ---
-    // Set initial color/level if specified, BEFORE the loop starts
+    // Check if alert is still running
+    if (!state.isAlertRunning) {
+        logDebug "processPatternStep: Alert stopped. Exiting step ${stepIndex}, loop ${loopCounter}."
+        atomicState.remove("currentPatternParamsJson") // Clean up if stopped mid-pattern
+        return
+    }
+
+    // Retrieve pattern data from atomicState
+    String patternParamsJson = atomicState.currentPatternParamsJson
+    if (!patternParamsJson) {
+        log.error "processPatternStep: Could not find pattern data in atomicState.currentPatternParamsJson. Stopping alert."
+        stopAlertImmediate(reason: "Pattern data missing")
+        return
+    }
+
+    // Parse the consolidated JSON payload
+    def jsonSlurper = new JsonSlurper()
+    Map patternParams = [:]
     try {
-        def initialAttrs = [:]
-        if (patternInfo.color && hasColorCapability(device)) initialAttrs.color = patternInfo.color
-        if (patternInfo.level != null && hasLevelCapability(device)) initialAttrs.level = patternInfo.level
-
-        if (initialAttrs) {
-            setDeviceAttributes(device, initialAttrs)
-            pauseExecution(500) // Allow attributes to set
-        }
-    } catch (e) {
-        log.warn "Error setting initial attributes for ${device.displayName}: ${e.message}"
+        patternParams = jsonSlurper.parseText(patternParamsJson)
+    } catch (Exception e) {
+        log.error "Error parsing patternParamsJson from atomicState in processPatternStep: ${e.message}"
+        log.error "--> JSON was: ${patternParamsJson}"
+        stopAlertImmediate(reason: "Error parsing pattern data")
+        return
     }
 
-    // --- Execution Loop ---
-    while(atomicState.runLoop && (isInfinite || loopCounter < repeatCount)) {
-        logDebug "Pattern loop iteration ${loopCounter + 1} for ${device.displayName}. runLoop: ${atomicState.runLoop}"
+    // Access parameters from the parsed map
+    List commands = patternParams.commands ?: []
+    Map colorMap = patternParams.colorMap // May be null
+    def repeatCount = patternParams.repeatCount
+    def isInfinite = patternParams.isInfinite
+    def level = patternParams.level
+    def offLevel = patternParams.offLevel
+    def patternType = patternParams.patternType
 
-        for (cmd in commands) {
-            // Check stop flags before each command
-            if (!atomicState.runLoop || atomicState.stopRequested) {
-                logDebug "Stop requested (runLoop=${atomicState.runLoop}, stopRequested=${atomicState.stopRequested}) during pattern execution for ${device.displayName}"
-                completedNormally = false
-                break // Exit inner command loop
-            }
+    // Basic validation
+    if (commands.isEmpty() || repeatCount == null || isInfinite == null || patternType == null) {
+        log.error "processPatternStep: Missing essential parameters after parsing JSON. Parsed map: ${patternParams}. Stopping alert."
+        stopAlertImmediate(reason: "Invalid pattern data")
+        return
+    }
 
-            try {
-                boolean turnOn = cmd.on
-                long duration = cmd.duration
+    // Check if pattern loops are finished (for finite patterns)
+    if (!isInfinite && loopCounter >= repeatCount) {
+        logDebug "processPatternStep: Finite pattern completed (${loopCounter}/${repeatCount} loops). No more steps."
+        // Final cleanup is handled by the scheduled finalCleanupAndRestore
+        return
+    }
 
-                if (turnOn) {
-                    // Set color and level for the ON state
-                    def targetLevel = patternInfo.level ?: 100 // Default to 100 if not set
+    // Get the command for the current step index
+    if (stepIndex >= commands.size()) {
+        log.error "processPatternStep: stepIndex ${stepIndex} is out of bounds for commands list size ${commands.size()}. This shouldn't happen. Stopping alert."
+        stopAlertImmediate(reason: "Pattern step index error")
+        return
+    }
+    Map currentCommand = commands[stepIndex]
+    boolean turnOn = currentCommand.on
+    long duration = currentCommand.duration ?: 1000 // Default duration if missing
 
-                    // Apply color FIRST if specified (using the HSL map)
-                    if (patternInfo.colorMap && hasColorCapability(device)) {
-                        try {
-                            logDebug "Setting color map for ${device.displayName}: ${patternInfo.colorMap}"
-                            device.setColor(patternInfo.colorMap) // Pass HSL map
-                            pauseExecution(300) // Pause after color set
-                        } catch (e) {
-                            log.warn "Error setting color map for ${device.displayName} during ON phase: ${e.message}"
-                        }
-                    }
+    logDebug "processPatternStep: Loop ${loopCounter + 1}/${isInfinite ? 'Inf' : repeatCount}, Step ${stepIndex + 1}/${commands.size()}. Action: ${turnOn ? 'ON' : 'OFF'}, Duration: ${duration}ms"
 
-                    // Apply level SECOND
-                    if (hasLevelCapability(device)) {
-                         try {
-                            logDebug "Setting level for ${device.displayName}: ${targetLevel}"
-                            device.setLevel(targetLevel)
-                            pauseExecution(200) // Pause after level set
-                         } catch (e) {
-                            log.warn "Error setting level for ${device.displayName} during ON phase: ${e.message}"
-                         }
-                    }
+    // --- Apply command to ALL devices ---
+    settings.devices.each { device -> // Explicitly use settings.devices
+        try {
+            if (turnOn) {
+                def targetLevel = level ?: 100
+                // Apply color FIRST if specified
+                if (colorMap && hasColorCapability(device)) {
+                    try {
+                        // logDebug "Setting color map for ${device.displayName}: ${colorMap}" // Reduce noise
+                        device.setColor(colorMap)
+                    } catch (e) { log.warn "Error setting color map for ${device.displayName}: ${e.message}" }
+                }
+                // Apply level SECOND
+                if (hasLevelCapability(device)) {
+                     try {
+                        // logDebug "Setting level for ${device.displayName}: ${targetLevel}" // Reduce noise
+                        device.setLevel(targetLevel)
+                     } catch (e) { log.warn "Error setting level for ${device.displayName}: ${e.message}" }
+                }
+                // Ensure device is ON THIRD (after color/level)
+                // logDebug "Turning ON ${device.displayName}" // Reduce noise
+                device.on()
+                // logDebug "${device.displayName} is ON" // Reduce noise
 
-                    // Ensure device is ON THIRD (after color/level)
+            } else { // OFF state logic
+                def targetOffLevel = offLevel ?: 0
+                if (targetOffLevel > 0 && hasLevelCapability(device)) {
+                    // logDebug "Setting OFF level for ${device.displayName}: ${targetOffLevel}" // Reduce noise
+                    device.setLevel(targetOffLevel)
+                    // Ensure the device is ON to maintain the dim level
                     if (device.currentValue("switch") != "on") {
-                        logDebug "Turning ON ${device.displayName}"
-                        device.on()
-                        pauseExecution(100) // Small pause after turning on
+                         // logDebug "Turning ON ${device.displayName} to maintain OFF level" // Reduce noise
+                         device.on()
                     }
-                    // Log actual level after attempting to set everything
-                    logDebug "${device.displayName} is ON at level ${device.currentValue('level')}" + (patternInfo.colorMap ? " with color map ${patternInfo.colorMap}" : "")
-
-                } else { // OFF state logic
-                    def targetOffLevel = patternInfo.offLevel ?: 0 // Default to 0 if not set or 0
-                    if (targetOffLevel > 0 && hasLevelCapability(device)) {
-                        // Set the device to the specified low level
-                        logDebug "Setting OFF level for ${device.displayName}: ${targetOffLevel}"
-                        device.setLevel(targetOffLevel)
-                        // Ensure the device is ON to maintain the dim level
-                        if (device.currentValue("switch") != "on") {
-                             logDebug "Turning ON ${device.displayName} to maintain OFF level"
-                             device.on() // Turn ON only if it's currently OFF
-                             pauseExecution(100)
-                        }
-                        logDebug "${device.displayName} set to OFF Level ${targetOffLevel}"
-                    } else {
-                        // Standard OFF behavior
-                        logDebug "Turning OFF ${device.displayName}"
-                        device.off()
-                        logDebug "${device.displayName} is OFF"
-                    }
+                    // logDebug "${device.displayName} set to OFF Level ${targetOffLevel}" // Reduce noise
+                } else {
+                    // Standard OFF behavior
+                    // logDebug "Turning OFF ${device.displayName}" // Reduce noise
+                    device.off()
+                    // logDebug "${device.displayName} is OFF" // Reduce noise
                 }
-                pauseExecution(duration) // Apply the pause AFTER setting the state
-
-            } catch (Exception e) {
-                log.error "Error executing pattern step on ${device.displayName}: ${e.message}"
-                completedNormally = false
-                // Consider stopping the entire alert on error?
-                // stopAlertImmediate(reason: "Error executing pattern on ${device.displayName}")
-                break // Exit inner command loop
             }
-        } // End command loop
-
-        // Check stop flags again before next loop iteration
-        if (!atomicState.runLoop || atomicState.stopRequested || !completedNormally) {
-            break // Exit outer while loop if stopped or error
+        } catch (Exception e) {
+            log.error "Error executing step ${stepIndex} on ${device.displayName}: ${e.message}"
+            // Continue to next device even if one fails
         }
-        loopCounter++
-    } // End while loop
+    } // End devices.each
 
-    logDebug "Pattern loop finished for ${device.displayName}. Completed Normally: ${completedNormally}, Infinite: ${isInfinite}"
+    // --- Schedule the next step ---
+    int nextStepIndex = stepIndex + 1
+    int nextLoopCounter = loopCounter
 
-    // --- Final State & Cleanup ---
-    // --- Final State & Cleanup ---
-    // Check if stop was requested via button
-    if (atomicState.stopRequested) {
-        logDebug "Stop was requested via button (atomicState.stopRequested=true). Attempting restore within executeDevicePattern."
-        boolean shouldRestore = state.restorePreviousEnabled ?: false
-        if (shouldRestore) {
-            // Restore using the JSON state
-            String previousStatesJson = atomicState.previousStatesJson
-            if (previousStatesJson) {
-                logDebug("Found previousStatesJson in executeDevicePattern: ${previousStatesJson}")
-                try {
-                    Map statesToRestoreMap = new JsonSlurper().parseText(previousStatesJson)
-                    if (statesToRestoreMap && !statesToRestoreMap.isEmpty()) {
-                        logDebug("Successfully parsed JSON. Calling restoreDeviceStates.")
-                        restoreDeviceStates(statesToRestoreMap)
-                    } else {
-                        log.warn("Parsed JSON map is empty or null in executeDevicePattern. Turning devices off.")
-                        devices?.off() // Turn off if restore data is bad
-                        atomicState.previousStatesJson = null // Clear invalid state
-                    }
-                } catch (Exception e) {
-                    log.error("Error parsing previousStatesJson in executeDevicePattern: ${e.message}. Turning devices off.")
-                    devices?.off() // Turn off on error
-                    atomicState.previousStatesJson = null // Clear invalid state
-                }
-            } else {
-                logDebug("atomicState.previousStatesJson is empty/null in executeDevicePattern. Turning devices off.")
-                devices?.off() // Turn off if no state saved
-            }
-        } else {
-            logDebug "Restore disabled, turning devices off within executeDevicePattern."
-            devices?.off() // Ensure devices are off if restore is disabled
-        }
-        // Reset the flag after handling
-        atomicState.stopRequested = false
+    // Check if we finished the command list for this loop
+    if (nextStepIndex >= commands.size()) {
+        nextStepIndex = 0 // Reset to first step
+        nextLoopCounter++ // Increment loop counter
     }
-    // Case: Pattern completed normally, is finite, and wasn't stopped by button
-    else if (completedNormally && !isInfinite) {
-        logDebug "Finite pattern completed normally (stopRequested=false). Attempting restore within executeDevicePattern."
-        boolean shouldRestore = state.restorePreviousEnabled ?: false
-        if (shouldRestore) {
-            // Restore using the JSON state
-            String previousStatesJson = atomicState.previousStatesJson
-            if (previousStatesJson) {
-                logDebug("Found previousStatesJson in executeDevicePattern (normal completion): ${previousStatesJson}")
-                try {
-                    Map statesToRestoreMap = new JsonSlurper().parseText(previousStatesJson)
-                    if (statesToRestoreMap && !statesToRestoreMap.isEmpty()) {
-                        logDebug("Successfully parsed JSON. Calling restoreDeviceStates.")
-                        restoreDeviceStates(statesToRestoreMap)
-                    } else {
-                        log.warn("Parsed JSON map is empty or null in executeDevicePattern (normal completion). Turning devices off.")
-                        devices?.off() // Turn off if restore data is bad
-                        atomicState.previousStatesJson = null // Clear invalid state
-                    }
-                } catch (Exception e) {
-                    log.error("Error parsing previousStatesJson in executeDevicePattern (normal completion): ${e.message}. Turning devices off.")
-                    devices?.off() // Turn off on error
-                    atomicState.previousStatesJson = null // Clear invalid state
-                }
-            } else {
-                logDebug("atomicState.previousStatesJson is empty/null in executeDevicePattern (normal completion). Turning devices off.")
-                devices?.off() // Turn off if no state saved
-            }
-        } else {
-            logDebug "Restore disabled, turning devices off within executeDevicePattern (normal completion)."
-            devices?.off() // Ensure devices are off if restore is disabled
-        }
+
+    // Check again if alert is running before scheduling
+    if (!state.isAlertRunning) {
+        logDebug "processPatternStep: Alert stopped after processing step ${stepIndex}. Not scheduling next step."
+        return
     }
-    // Case: Pattern is infinite, or completed abnormally, or was stopped by other means
-    else {
-         logDebug "Pattern finished abnormally, is infinite, or was stopped by other means (stopRequested=false)."
-         // Infinite patterns rely on timeout or manual stop.
-         // Abnormal completion leaves devices in last state before error.
-         // If restore is disabled, devices should be off already or turned off by stopAlertImmediate/stopAlert.
+
+    // Check if the pattern should continue (either infinite or loops remaining)
+    if (isInfinite || nextLoopCounter < repeatCount) {
+        logDebug "processPatternStep: Scheduling next step (Index: ${nextStepIndex}, Loop: ${nextLoopCounter}) in ${duration}ms"
+        runInMillis(duration, "processPatternStep", [data: [stepIndex: nextStepIndex, loopCounter: nextLoopCounter], overwrite: false]) // Use overwrite: false to allow multiple steps pending
+    } else {
+        logDebug "processPatternStep: Finished last loop (${nextLoopCounter}/${repeatCount}). No more steps to schedule."
+        // Final cleanup is handled by the scheduled finalCleanupAndRestore
     }
-    // Removed extra closing brace
-    // If pattern was stopped early (!completedNormally), the stop function was already called.
-    // If pattern is infinite, it relies on timeout or manual stop.
 }
 
-// Unused restoreDeviceState helper method removed
-
+// Old executeDevicePattern function removed
 
 // Helper to set device attributes (level, color, CT)
 private void setDeviceAttributes(device, Map attrs) {
@@ -1662,163 +1631,90 @@ private Map hexToHslMap(String hexColor, Integer level = 100) {
         } else {
              log.error "scaledSaturation was null before rounding!"
         }
-        // Use the level passed into the function, which comes from alertLevel setting
-        Integer hubLevel = level ?: 100
 
-        // Clamp values just in case
-        hubHue = Math.max(0, Math.min(100, hubHue))
-        hubSaturation = Math.max(0, Math.min(100, hubSaturation))
-        hubLevel = Math.max(1, Math.min(100, hubLevel)) // Level should be 1-100
-
-        Map hslMap = [hue: hubHue, saturation: hubSaturation, level: hubLevel]
-        // logDebug "Converted Hex ${hexColor} to HSL Map: ${hslMap}" // Keep commented out for potential future debugging
-        return hslMap
+        // Return the map
+        return [hue: hubHue, saturation: hubSaturation, level: level ?: 100]
 
     } catch (Exception e) {
-        log.error "Error converting hex ${hexColor} to HSL: [${e.class.name}] ${e.message}"
-        // Default to White on error
-        return [hue: 0, saturation: 0, level: level ?: 100]
+        log.error "Error converting hex color ${hexColor} to HSL map: ${e.message}"
+        return [hue: 0, saturation: 0, level: level ?: 100] // Default to white on any error
     }
 }
 
-
-// Check if device has ColorControl capability or related commands/attributes
+// Checks if a device has the ColorControl capability
 private boolean hasColorCapability(device) {
-    try {
-        return device.hasCapability("ColorControl") ||
-               device.hasCommand("setColor") ||
-               device.hasCommand("setHue") ||
-               device.hasAttribute("hue")
-    } catch (e) { return false }
+    return device.hasCapability("ColorControl")
 }
 
-// Check if device has SwitchLevel capability or related commands/attributes
-private boolean hasLevelCapability(device) {
-     try {
-        return device.hasCapability("SwitchLevel") ||
-               device.hasCommand("setLevel") ||
-               device.hasAttribute("level")
-    } catch (e) { return false }
-}
-
-// Check if device has ColorTemperature capability or related commands/attributes
+// Checks if a device has the ColorTemperature capability
 private boolean hasColorTemperature(device) {
-     try {
-        return device.hasCapability("ColorTemperature") ||
-               device.hasCommand("setColorTemperature") ||
-               device.hasAttribute("colorTemperature")
-    } catch (e) { return false }
+    return device.hasCapability("ColorTemperature")
 }
 
-// Log debug messages if enabled
-private void logDebug(String msg) {
+// Checks if a device has the SwitchLevel capability
+private boolean hasLevelCapability(device) {
+    return device.hasCapability("SwitchLevel")
+}
+
+// Send notification to selected devices and/or parent app
+def sendNotification(String message) {
+    if (notificationDevices) {
+        logDebug "Sending notification to devices: ${message}"
+        notificationDevices.deviceNotification(message)
+    }
+    // Check if parent notifications are enabled
+    if (parent?.sendChildNotification) { // Check if method exists
+        try {
+            parent.sendChildNotification(message) // Send notification via parent
+            logDebug "Sent notification to parent app: ${message}"
+        } catch (Exception e) {
+            log.warn "Could not send notification to parent app: ${e.message}"
+        }
+    } else {
+        logDebug "Parent app notifications are disabled."
+    }
+}
+
+// Logging helper
+void logDebug(String msg) {
     if (enableLogging) {
         log.debug msg
     }
 }
 
-// Send notifications
-private void sendNotification(String message) {
-    logDebug "Sending notification: ${message}"
-    // Send to notification devices if configured
-    if (notificationDevices) {
-        notificationDevices.each { device ->
-            try {
-                device.deviceNotification(message)
-            } catch (e) {
-                log.error "Error sending notification to device ${device.displayName}: ${e.message}"
-            }
-        }
-    }
-
-    // Send to parent app for system-wide notifications (with checks)
-    if (parent) {
-        try {
-            // Check if parent has the setting and it's enabled (using respondsTo for safety)
-            boolean parentNotifyEnabled = false
-            if (parent.respondsTo("getEnableNotifications")) {
-                parentNotifyEnabled = parent.getEnableNotifications()
-            } else if (parent.respondsTo("getSettings") && parent.settings?.enableNotifications) {
-                // Alternative check via settings map if getter doesn't exist
-                parentNotifyEnabled = parent.settings.enableNotifications
-            }
-
-            if (parentNotifyEnabled) {
-                 // Check if parent actually has the method before calling
-                 if (parent.respondsTo("sendNotification", String)) {
-                    parent.sendNotification(message)
-                    logDebug "Sent notification to parent app"
-                 } else {
-                    log.warn "Parent app does not have a sendNotification(String) method."
-                 }
-            } else {
-                logDebug "Parent app notifications are disabled."
-            }
-        } catch (Exception e) {
-            log.error "Error sending notification to parent app: ${e.message}"
-            // Continue execution even if parent notification fails
-        }
-    }
+// Logging helper for warnings
+void logWarn(String msg) {
+    log.warn msg // Warnings are always logged
 }
 
-// Helper method to get a device by ID from the configured list
-def getDeviceById(deviceId) {
-    return devices.find { it.id == deviceId }
+// Helper to format section headers
+private String getFormat(type, msg) {
+    if (type == "header-blue") { // Example type
+        msg = "<div style='color:#66ccff;font-weight:bold'>${msg}</div>"
+    }
+    return msg
 }
 
-// Keep isActive for potential external checks, but map it to the new state
-def isActive() {
-    return state.isAlertRunning ?: false
+// Helper to get image path (replace with actual paths if needed)
+private String getImage(img) {
+    // return "<img src='https://raw.githubusercontent.com/bptworld/Hubitat/master/resources/images/${img}.png' width='30' height='30'></img>"
+    return "" // Placeholder if images aren't used
 }
 
-// Helper function to determine contrast color (black or white) for text on a colored background
-private String getContrastColor(String hexColor) {
-    if (!hexColor || hexColor.length() < 7 || !hexColor.startsWith("#")) {
-        return "#000000" // Default to black if color is invalid
-    }
-    try {
-        // Simplified contrast logic (adjust as needed)
-        def color = hexColor.replace("#", "")
-        def r = Integer.parseInt(color.substring(0, 2), 16)
-        def g = Integer.parseInt(color.substring(2, 4), 16)
-        def b = Integer.parseInt(color.substring(4, 6), 16)
-        // Using standard luminance formula
-        def luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
-        // logDebug "Calculated luminance for ${hexColor}: ${luminance}" // Optional debug
-        return luminance > 0.5 ? "#000000" : "#FFFFFF" // Return black for light backgrounds, white for dark
-    } catch (Exception e) {
-        log.warn "Error calculating contrast color for ${hexColor}: ${e.message}"
-        return "#000000" // Default to black on error
-    }
-} // Added missing closing brace for getContrastColor
-
-    // Display custom styled header
-    def display() {
-        // Use settings.alertName, provide default if null/empty
-        def childName = settings.alertName ?: "New Alert"
-        def headerText = "VisualAlert - ${childName}"
-        section() { // Use an empty section to contain the paragraph
-            paragraph "<h2 style='color:#007bff; font-weight:bold; text-align:center; font-size:1.5em;'>${headerText}</h2>" // Increased font size
-            // Optionally add a subtitle or line like in The Flasher
-            // paragraph "<div style='color:#007bff; text-align:center;'>Child Alert Configuration</div>"
-            paragraph "<hr style='background-color:#007bff; height: 1px; border: 0;' />" // Add a separator line
-        }
-    }
-// Removed misplaced closing brace
-
-// ***** Style Formatting Methods (Adapted from @Stephack Code / @bptworld The Flasher) *****
-def getFormat(type, myText="") {
-    // Using a standard blue color
-    if(type == "header-blue") return "<div style='color:#ffffff;font-weight: bold;background-color:#007bff;border: 1px solid;box-shadow: 2px 3px #A9A9A9;padding: 8px;border-radius: 8px;'>${myText}</div>" // Increased padding and added border-radius
-    // Add other formats here if needed in the future
-    return myText // Default return
+// Helper to display common elements (like title)
+private void display() {
+    setVersion()
+    // paragraph title() // Removed paragraph wrapper
+    // paragraph "<hr>" // Removed horizontal rule
 }
 
-def getImage(imgName) {
-    // Using bptworld's image repo for the blank image placeholder - requires internet access from the hub
-    def iconUrl = "https://raw.githubusercontent.com/bptworld/Hubitat/master/resources/images/"
-    // Using a 1x1 transparent pixel image for spacing
-    if(imgName == "Blank") return "<img src='${iconUrl}blank.png' width='1' height='1' style='margin-right: 5px;'>"
-    // Add other images here if needed
-    return "" // Default return
+// Sets the version number in state
+private void setVersion(){
+    state.version = "1.1.5" // Update this with the actual version
+}
+
+// Provides the title for display pages
+String title() {
+    def txt = "<div style='color:#66ccff;font-weight:bold;font-size:20px;text-align:center'>VisualAlert Child (${state.version})</div>"
+    return txt
 }
