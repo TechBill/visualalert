@@ -7,7 +7,7 @@
  *  Copyright 2024
  *  Licensed under the Apache License, Version 2.0
  *
- *  Version: 1.2.5
+ *  Version: 1.2.8
  */
 
 import groovy.json.JsonOutput
@@ -359,7 +359,7 @@ def patternPage() {
                 description: "Set to 0 for complete off, or higher to dim instead of turning completely off"
 
             input "restorePrevious", "bool",
-                title: "Restore Previous State After Alert",
+                title: "Restore Last State (disabled = all devices off after alert)",
                 defaultValue: true
         }
 
@@ -483,7 +483,8 @@ def initialize() {
     // previewStates state variable removed
 
     // Store restorePrevious setting in state for reliable access (read via settings map)
-    state.restorePreviousEnabled = (settings.restorePrevious as Boolean) ?: true // Default to true if null
+    // Default to true only if the setting is null (not set), otherwise use the actual boolean value
+    state.restorePreviousEnabled = (settings.restorePrevious != null) ? (settings.restorePrevious as Boolean) : true
     logDebug "initialize: Stored restorePreviousEnabled in state: ${state.restorePreviousEnabled}"
 
     // Initialize disabled state based on disableSwitch and disableCondition
@@ -930,19 +931,36 @@ def finalCleanupAndRestore(data) {
     log.info "Final cleanup and restore initiated due to: ${reason}"
 
     // Check if alert is still considered running (might have been stopped manually already)
-    if (!state.isAlertRunning) {
-        logDebug "Alert already stopped, ignoring scheduled finalCleanupAndRestore call."
-        // Ensure any lingering schedule is cancelled just in case
+    // Note: state.isAlertRunning might be false if called directly from stopAlertImmediate
+    // We proceed anyway to ensure restoration happens after an immediate stop.
+    // if (!state.isAlertRunning && reason != "manual stop" && !reason.startsWith("Stop")) { // More complex check if needed
+    if (!state.isAlertRunning && reason == "pattern completed") { // Only skip if already stopped AND it was a normal completion
+        logDebug "Alert already stopped (likely via immediate stop), ignoring scheduled finalCleanupAndRestore call for 'pattern completed'."
         unschedule("finalCleanupAndRestore")
         return
     }
 
     // --- Stop Pattern & Restore State ---
-    // Set running flag false FIRST to signal loops
-    state.isAlertRunning = false
-    logDebug "finalCleanupAndRestore: Set state.isAlertRunning to false"
+    // Set running flag false FIRST to signal loops (if not already false from immediate stop)
+    if (state.isAlertRunning) {
+        state.isAlertRunning = false
+        logDebug "finalCleanupAndRestore: Set state.isAlertRunning to false"
+    }
     // atomicState.runLoop = false // Removed
     unschedule("processPatternStep") // Cancel any pending steps
+
+    // --- Conditionally Force ON for Immediate Stops ---
+    def immediateStopReasons = ["manual stop", "Stop Test button pressed", "Stop button pressed", "disabled by switch", "new alert triggered"]
+    boolean isImmediateStop = immediateStopReasons.any { reason.contains(it) }
+
+    if (isImmediateStop) {
+        logDebug("finalCleanupAndRestore: Immediate stop detected ('${reason}'). Forcing devices ON before restore.")
+        devices?.on()
+        pauseExecution(200) // Shorter pause just in case
+    }
+    // --- End Conditional Force ON ---
+
+
     boolean shouldRestore = state.restorePreviousEnabled ?: false
     logDebug "finalCleanupAndRestore: Checking restorePreviousEnabled state value: ${shouldRestore}"
 
@@ -970,13 +988,15 @@ def finalCleanupAndRestore(data) {
             devices?.off()
         }
     } else {
-        // If not restoring, ensure devices are turned off
+        // --- UPDATED: Always turn off if restore is disabled ---
         logDebug "finalCleanupAndRestore: Restore disabled, turning devices off."
         devices?.off()
+        // --- END UPDATE ---
     }
 
     // --- Notifications ---
-    if (notifyEnd) {
+    // Send notification only if it wasn't triggered by a new alert starting
+    if (notifyEnd && reason != "new alert triggered") {
         // Use the original alert reason if available, otherwise the cleanup reason
         def notifyReason = state.alertReason ?: reason
         sendNotification("VisualAlert: ${alertName} deactivated - ${notifyReason}")
@@ -1031,8 +1051,13 @@ def stopAlertImmediate(evtOrParams = null) {
     unschedule("finalCleanupAndRestore")
     logDebug "stopAlertImmediate: Unscheduled any pending finalCleanupAndRestore."
 
+    // --- REMOVED: Force devices ON before calling cleanup/restore for immediate stops ---
+    // logDebug("stopAlertImmediate: Forcing devices ON before calling finalCleanupAndRestore.")
+    // devices?.on()
+    // --- END REMOVAL ---
+
     // Call the central cleanup function immediately
-    // Pass the reason, but notification decision is made inside finalCleanupAndRestore
+    // Pass the reason, which will now be checked inside finalCleanupAndRestore
     finalCleanupAndRestore([reason: reason])
 }
 
@@ -1052,21 +1077,24 @@ void saveDeviceStates() {
             def currentSat = hasColorCapability(device) ? device.currentValue("saturation") : null
             def currentCT = hasColorTemperature(device) ? device.currentValue("colorTemperature") : null
 
-            // Determine switch state, considering level for capable devices
-            def currentSwitch
-            if (hasLevelCapability(device) && currentLevel != null && currentLevel > 0) {
-                // If level is > 0, consider it ON, even if switch reports off/null temporarily
-                currentSwitch = "on"
-                logDebug "Device ${device.displayName} has level ${currentLevel} > 0, considering switch state as 'on'."
-            } else {
-                // Otherwise, rely on the reported switch value
-                currentSwitch = device.currentValue("switch")
-                // Fallback for invalid reported switch state
-                if (currentSwitch != "on" && currentSwitch != "off") {
-                    logWarn "Device ${device.displayName} reported invalid switch state '${currentSwitch}', assuming 'off'."
-                    currentSwitch = "off"
+            // --- UPDATED Switch State Logic ---
+            // Determine switch state directly first
+            def currentSwitch = device.currentValue("switch")
+            logDebug "Device ${device.displayName}: Reported switch state: '${currentSwitch}'"
+
+            // Fallback for invalid reported switch state
+            if (currentSwitch != "on" && currentSwitch != "off") {
+                logWarn "Device ${device.displayName} reported invalid switch state '${currentSwitch}'. Attempting fallback using level."
+                // Fallback: Check level only if switch state is invalid
+                if (hasLevelCapability(device) && currentLevel != null && currentLevel > 0) {
+                     currentSwitch = "on"
+                     logWarn "Fallback: Using level ${currentLevel} > 0, assuming switch state is 'on'."
+                } else {
+                     currentSwitch = "off" // Final fallback
+                     logWarn "Fallback: Assuming switch state is 'off'."
                 }
             }
+            // --- END UPDATED Switch State Logic ---
 
             def stateObj = [
                 switch: currentSwitch,
@@ -1108,15 +1136,16 @@ def restoreDeviceStates(Map statesToRestore) { // Now requires the map to restor
 
     log.info "Restoring device states. Count: ${statesToRestore?.size() ?: 0}. States: ${statesToRestore}"
 
-    // First, turn off all devices to ensure a clean state before restoring ON states
-    settings.devices?.each { device -> // Explicitly use settings.devices
-        try {
-            device.off()
-        } catch (Exception e) {
-            log.warn "Error turning off ${device.displayName} during pre-restore: ${e.message}"
-        }
-    }
-    pauseExecution(1000) // Give devices time to settle
+    // --- REMOVED pre-restore OFF loop ---
+    // settings.devices?.each { device -> // Explicitly use settings.devices
+    //     try {
+    //         device.off()
+    //     } catch (Exception e) {
+    //         log.warn "Error turning off ${device.displayName} during pre-restore: ${e.message}"
+    //     }
+    // }
+    // pauseExecution(1000) // Give devices time to settle
+    // --- END REMOVAL ---
 
     // Now restore previous states
     settings.devices.each { device -> // Explicitly use settings.devices
@@ -1145,7 +1174,13 @@ def restoreDeviceStates(Map statesToRestore) { // Now requires the map to restor
                         device.on()
                     }
                 } else {
-                    // Ensure device is OFF (already turned off above, but double-check)
+                    // --- ADDED: Restore attributes even if turning off ---
+                    logDebug "Device ${device.displayName} should be OFF. Restoring attributes first."
+                    restoreDeviceAttributes(device, prevState)
+                    pauseExecution(500) // Wait for attributes to potentially take effect
+                    // --- END ADD ---
+
+                    // Ensure device is OFF
                     device.off()
                     logDebug "Ensured ${device.displayName} is OFF (as per saved state)"
                 }
@@ -1455,7 +1490,10 @@ def processPatternStep(data) {
         }
     } // End devices.each
 
-    // --- Schedule the next step ---
+    // --- Check if this was the absolute last step ---
+    boolean isLastStepOfLastLoop = !isInfinite && loopCounter == (repeatCount - 1) && stepIndex == (commands.size() - 1)
+
+    // --- Schedule the next step OR Force ON if last step ---
     int nextStepIndex = stepIndex + 1
     int nextLoopCounter = loopCounter
 
@@ -1465,21 +1503,29 @@ def processPatternStep(data) {
         nextLoopCounter++ // Increment loop counter
     }
 
-    // Check again if alert is running before scheduling
+    // Check again if alert is running before scheduling/forcing ON
     if (!state.isAlertRunning) {
-        logDebug "processPatternStep: Alert stopped after processing step ${stepIndex}. Not scheduling next step."
+        logDebug "processPatternStep: Alert stopped after processing step ${stepIndex}. Not scheduling next step or forcing ON."
         return
     }
 
-    // Check if the pattern should continue (either infinite or loops remaining)
-    if (isInfinite || nextLoopCounter < repeatCount) {
+    if (isLastStepOfLastLoop) {
+        // This was the final step of a finite pattern
+        logDebug "processPatternStep: Executed final step of finite pattern. Forcing devices ON immediately."
+        settings.devices?.on() // Force ON immediately after last step
+        logDebug "processPatternStep: Finished last loop (${nextLoopCounter}/${repeatCount}). No more steps to schedule."
+        // Final cleanup (restore) is handled by the scheduled finalCleanupAndRestore
+    } else if (isInfinite || nextLoopCounter < repeatCount) {
+        // Schedule the next step if the pattern should continue
         logDebug "processPatternStep: Scheduling next step (Index: ${nextStepIndex}, Loop: ${nextLoopCounter}) in ${duration}ms"
         runInMillis(duration, "processPatternStep", [data: [stepIndex: nextStepIndex, loopCounter: nextLoopCounter], overwrite: false]) // Use overwrite: false to allow multiple steps pending
     } else {
+        // This case should technically not be reached if isLastStepOfLastLoop is handled above, but kept as safety
         logDebug "processPatternStep: Finished last loop (${nextLoopCounter}/${repeatCount}). No more steps to schedule."
         // Final cleanup is handled by the scheduled finalCleanupAndRestore
     }
 }
+
 
 // Old executeDevicePattern function removed
 
