@@ -150,7 +150,7 @@ You can create custom patterns by:
 
 ## Support and Feedback
 
-For support, feature requests, or to report bugs, please [open an issue](https://github.com/yourusername/VisualAlert/issues) on GitHub.
+For support, feature requests, or to report bugs, please [open an issue]([https://github.com/yourusername/VisualAlert/issues](https://community.hubitat.com/t/introducing-visualalert-a-smart-flashing-system-designed-by-a-deaf-user-for-real-life-needs/152512)) on Hubitat Community Forum.
 
 ## License
 
