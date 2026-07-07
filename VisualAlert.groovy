@@ -7,7 +7,7 @@
  *  Copyright 2024
  *  Licensed under the Apache License, Version 2.0
  *
- *  Version: 1.2.8
+ *  Version: 1.3.0
  */
 
 definition(
@@ -16,9 +16,9 @@ definition(
     author: "Bill Fleming",
     description: "Advanced visual notification system using smart devices for alerts and notifications",
     category: "Convenience",
-    iconUrl: "http://cdn.device-icons.smartthings.com/Lighting/light11-icn.png",
-    iconX2Url: "http://cdn.device-icons.smartthings.com/Lighting/light11-icn@2x.png",
-    iconX3Url: "http://cdn.device-icons.smartthings.com/Lighting/light11-icn@3x.png",
+    iconUrl: "",
+    iconX2Url: "",
+    iconX3Url: "",
     singleInstance: true
 )
 
@@ -30,8 +30,8 @@ def mainPage() {
     // Check if this is initial setup or the app is already installed
     def isInstalled = app.getInstallationState() == "COMPLETE"
 
-    dynamicPage(name: "mainPage", title: "", install: true, uninstall: true, nextPage: null) { // Removed title
-        display() // Added display call
+    dynamicPage(name: "mainPage", title: "", install: true, uninstall: true, nextPage: null) {
+        display()
         section(getFormat("header-blue", "${getImage("Blank")}" + "System Status")) {
             paragraph "VisualAlert System v${version()}"
             if (isInstalled) {
@@ -41,12 +41,11 @@ def mainPage() {
 
         if (isInstalled) {
             // Only show child app creation if the parent app is already installed
-            section(getFormat("header-blue", "${getImage("Blank")}" + "VisualAlert Child(s)")) { // Changed section title
-                // Removed description paragraph
+            section(getFormat("header-blue", "${getImage("Blank")}" + "VisualAlert Child(s)")) {
                 app(name: "visualAlertChildApps",
                     appName: "VisualAlert Child",
                     namespace: "TechBill",
-                    title: "Create VisualAlert Child", // Changed button text
+                    title: "Create VisualAlert Child",
                     multiple: true)
             }
         } else {
@@ -97,7 +96,7 @@ def initialize() {
 }
 
 def version() {
-    return "1.0.32"
+    return "1.3.0"
 }
 
 def runSystemHealthCheck() {
@@ -106,7 +105,14 @@ def runSystemHealthCheck() {
 
     // Check child apps
     status.childApps = childApps.size()
-    status.activeAlerts = childApps.count { it.isActive() ?: false }
+    status.activeAlerts = childApps.count { child ->
+        try {
+            child.isActive() ?: false
+        } catch (Exception e) {
+            logDebug "Child app ${child.label} does not report active state: ${e.message}"
+            false
+        }
+    }
 
     // Check system resources - don't use runtime.freeMemory() as it causes errors
     status.memory = "Not Available in Hubitat"
@@ -115,6 +121,16 @@ def runSystemHealthCheck() {
     state.systemStatus = status
 
     return status
+}
+
+// Called by child apps to route notifications through the parent.
+// Honors the "Enable System Notifications" global setting.
+def sendChildNotification(String message) {
+    if (settings.enableNotifications == false) {
+        logDebug "System notifications disabled, skipping: ${message}"
+        return
+    }
+    log.info "VisualAlert notification: ${message}"
 }
 
 def appButtonHandler(btn) {
@@ -136,7 +152,7 @@ private void logDebug(String msg) {
 // ***** Style Formatting Methods (Adapted from @Stephack Code / @bptworld The Flasher) *****
 def getFormat(type, myText="") {
     // Using a standard blue color
-    if(type == "header-blue") return "<div style='color:#ffffff;font-weight: bold;background-color:#007bff;border: 1px solid;box-shadow: 2px 3px #A9A9A9;padding: 8px;border-radius: 8px;'>${myText}</div>" // Increased padding and added border-radius
+    if(type == "header-blue") return "<div style='color:#ffffff;font-weight: bold;background-color:#007bff;border: 1px solid;box-shadow: 2px 3px #A9A9A9;padding: 8px;border-radius: 8px;'>${myText}</div>"
     // Add other formats here if needed in the future
     return myText // Default return
 }
@@ -154,7 +170,7 @@ def getImage(imgName) {
 def display() {
     def headerText = "VisualAlert" // Static title for parent
     section() { // Use an empty section to contain the paragraph
-        paragraph "<h2 style='color:#007bff; font-weight:bold; text-align:center; font-size:1.5em;'>${headerText}</h2>" // Increased font size
+        paragraph "<h2 style='color:#007bff; font-weight:bold; text-align:center; font-size:1.5em;'>${headerText}</h2>"
         paragraph "<hr style='background-color:#007bff; height: 1px; border: 0;' />" // Add a separator line
     }
 }

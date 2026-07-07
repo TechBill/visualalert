@@ -8,12 +8,12 @@ VisualAlert is a comprehensive visual notification system designed specifically 
 
 ## Features
 
-- **Multiple Alert Patterns**: Simple flashes, SOS, doorbell patterns, emergency alerts, steady on, and custom patterns
+- **Multiple Alert Patterns**: Simple Flash, Doorbell, Emergency, Strobe, Standby, and custom patterns
 - **Universal Compatibility**: Works with ALL switchable devices in Hubitat:
-  * Smart bulbs (Zigbee, Z-Wave, LAN)
-  * Wall switches and dimmers (Zigbee, Z-Wave)
-  * Smart outlets and plugs
-  * Any device with on/off capability
+  - Smart bulbs (Zigbee, Z-Wave, LAN)
+  - Wall switches and dimmers (Zigbee, Z-Wave)
+  - Smart outlets and plugs
+  - Any device with on/off capability
 - **Color Support**: Use different colors for different types of alerts (for color-capable devices)
 - **Dimming Support**: Control brightness levels for dimmable devices
 - **Advanced Triggers**: Motion, contact, switches, doorbells, water sensors, smoke/CO detectors
@@ -22,7 +22,6 @@ VisualAlert is a comprehensive visual notification system designed specifically 
 - **Failsafe Mechanisms**: Ensure devices return to normal state after alerts
 - **Preview Functionality**: Test patterns before saving
 - **Reliability Features**: Timeout protection, error handling, and state restoration
-
 
 ## Installation
 
@@ -49,9 +48,9 @@ If VisualAlert is not listed in search yet:
 5. Choose **From a URL**
 6. Paste the following URL:
 
-```
-https://raw.githubusercontent.com/TechBill/visualalert/master/packageManifest.json
-```
+   ```text
+   https://raw.githubusercontent.com/TechBill/visualalert/master/packageManifest.json
+   ```
 
 7. Click **Next** and follow the install prompts
 
@@ -61,8 +60,6 @@ https://raw.githubusercontent.com/TechBill/visualalert/master/packageManifest.js
 2. Click **+New App**
 3. Paste the code from `VisualAlert.groovy`, then click **Save**
 4. Repeat for `VisualAlertChild.groovy`
-5. (Optional) In **Drivers Code**, click **+New Driver**
-6. Paste the contents of `VisualAlertDriver.groovy` (if using) and click **Save**
 
 ## Usage
 
@@ -76,20 +73,20 @@ https://raw.githubusercontent.com/TechBill/visualalert/master/packageManifest.js
 6. Click **Create New Alert**
 7. Enter a name for your alert
 8. Select the devices you want to use for this alert (any switchable device)
-6. Select at least one trigger source (motion sensor, contact sensor, etc.)
-7. Configure the alert pattern
-8. Set any schedule or condition restrictions
-9. Configure advanced settings if needed
-10. Click **Done**
+9. Select at least one trigger source (motion sensor, contact sensor, etc.)
+10. Configure the alert pattern
+11. Set any schedule or condition restrictions
+12. Configure advanced settings if needed
+13. Click **Done**
 
 ### Alert Types
 
 - **Simple Flash**: Basic on/off flashing pattern
-- **SOS**: International distress signal (... --- ...)
-- **Doorbell**: Pattern mimicking a doorbell ring
-- **Emergency**: Rapid flashing for urgent situations
-- **Steady On**: Turns on and stays on for the duration of the alert
-- **Custom**: Define your own pattern
+- **Doorbell**: Two quick flashes followed by a pause
+- **Emergency**: Rapid flashing for urgent situations (always used automatically for smoke/CO triggers)
+- **Strobe**: Three rapid flashes followed by a short pause
+- **Standby**: On for 3 seconds, off for 3 seconds
+- **Custom**: Define your own ON/OFF sequence with millisecond timing
 
 ### Device Compatibility
 
@@ -111,16 +108,6 @@ VisualAlert works with any device that has on/off capability:
 - Use illuminance restrictions to make alerts brighter in bright rooms
 
 ## Advanced Configuration
-
-### Using the VisualAlert Driver
-
-The VisualAlert Driver provides additional functionality for advanced users:
-
-1. Go to **Devices** in your Hubitat hub
-2. Click **+Add Virtual Device**
-3. Select **VisualAlert Driver** as the type
-4. Give it a name and click **Save**
-5. Use this device in rules, scenes, or other automations
 
 ### Pattern Customization
 

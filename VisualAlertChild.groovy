@@ -7,7 +7,7 @@
  *  Copyright 2024
  *  Licensed under the Apache License, Version 2.0
  *
- *  Version: 1.2.8
+ *  Version: 1.3.0
  */
 
 import groovy.json.JsonOutput
@@ -20,9 +20,9 @@ definition(
     description: "Configure individual visual alert patterns and triggers",
     parent: "TechBill:VisualAlert",
     category: "Convenience",
-    iconUrl: "http://cdn.device-icons.smartthings.com/Lighting/light11-icn.png",
-    iconX2Url: "http://cdn.device-icons.smartthings.com/Lighting/light11-icn@2x.png",
-    iconX3Url: "http://cdn.device-icons.smartthings.com/Lighting/light11-icn@3x.png"
+    iconUrl: "",
+    iconX2Url: "",
+    iconX3Url: ""
 )
 
 preferences {
@@ -33,11 +33,11 @@ preferences {
 }
 
 def mainPage() {
-    dynamicPage(name: "mainPage", title: "", install: true, uninstall: true, nextPage: null) { // Removed title
-        display() // Added display call
+    dynamicPage(name: "mainPage", title: "", install: true, uninstall: true, nextPage: null) {
+        display()
         section(getFormat("header-blue", "${getImage("Blank")}" + "Alert Name & Devices")) {
             input "alertName", "text",
-                title: "VisualAlert Child Name", // Changed label
+                title: "VisualAlert Child Name",
                 required: true,
                 submitOnChange: true
 
@@ -49,14 +49,14 @@ def mainPage() {
         }
 
         section(getFormat("header-blue", "${getImage("Blank")}" + "Trigger Sources")) {
-            paragraph "Select switches, buttons, or sensors (Contact, Motion, Smoke, CO, Water) that will activate this alert" // Updated paragraph
+            paragraph "Select switches, buttons, or sensors (Contact, Motion, Smoke, CO, Water) that will activate this alert"
 
             input "triggerSwitches", "capability.switch",
                 title: "Switches",
                 multiple: true,
                 required: false,
                 submitOnChange: true,
-                description: "Select switches that can trigger this alert" // Updated description
+                description: "Select switches that can trigger this alert"
             // Dynamic inputs for ON/OFF selection for each trigger switch
             if (triggerSwitches) {
                 triggerSwitches.each { device ->
@@ -103,7 +103,7 @@ def mainPage() {
                         description: "Pick which button(s) will trigger the alert when pressed"
                 }
 
-                // Display selected buttons (Moved inside the 'if (buttonOptions)' block)
+               
                 if (selectedButtons) {
                     paragraph "<b>Selected Trigger Button(s):</b>"
                     selectedButtons.each { buttonId ->
@@ -130,9 +130,6 @@ input "motionSensors", "capability.motionSensor",
     required: false,
     submitOnChange: true,
     description: "Select motion sensors that can trigger this alert when motion becomes active"
-
-// Removed leftover comment
-// Removed duplicate comment
             // Smoke Sensors
             input "smokeSensors", "capability.smokeDetector",
                 title: "Smoke Sensors",
@@ -155,11 +152,9 @@ input "motionSensors", "capability.motionSensor",
                 required: false,
                 submitOnChange: true,
                 description: "Select water sensors that can trigger this alert when water is detected"
-
-            // Removed erroneous leftover code block
         }
 
-        section(getFormat("header-blue", "${getImage("Blank")}" + "Stop Alert | Enable/Disable VisualAlert Trigger")) { // Changed title
+        section(getFormat("header-blue", "${getImage("Blank")}" + "Stop Alert | Enable/Disable VisualAlert Trigger")) {
             paragraph "Optional: Select buttons that will stop this alert when pressed"
 
             input "stopButtonDevices", "capability.pushableButton",
@@ -169,7 +164,7 @@ input "motionSensors", "capability.motionSensor",
                 submitOnChange: true,
                 description: "Choose button devices that can stop this alert"
 
-            paragraph "Optional: Select switch that will enable/disable this child app." // Added description for disable switch
+            paragraph "Optional: Select switch that will enable/disable this child app."
             input "disableSwitch", "capability.switch",
                 title: "Disable Alert with Switch?",
                 required: false,
@@ -226,8 +221,6 @@ input "motionSensors", "capability.motionSensor",
             }
         }
 
-        // Test Alert section moved below
-
         section(getFormat("header-blue", "${getImage("Blank")}" + "Pattern Configuration")) {
             href "patternPage", title: "Configure Alert Pattern", description: "Set up how devices will alert"
         }
@@ -254,33 +247,13 @@ input "motionSensors", "capability.motionSensor",
     }
 }
 
-// Helper function to get pattern description (Moved before patternPage for clarity)
-String getPatternDescription(String patternType) {
-    switch (patternType) {
-        case "Simple Flash":
-            return "<b>Simple Flash:</b> A single flash on, then off. Repeats based on 'Number of Repeats'."
-        case "Doorbell":
-            return "<b>Doorbell:</b> Two quick flashes followed by a pause. Repeats based on 'Number of Repeats'."
-        case "Emergency":
-            return "<b>Emergency:</b> Rapid flashing sequence. Repeats based on 'Number of Repeats'." // Removed color mention
-        case "Strobe": // New
-            return "<b>Strobe:</b> Three rapid flashes followed by a short pause. Repeats based on 'Number of Repeats'."
-        case "Standby": // New
-            return "<b>Standby:</b> Device stays on for 3 seconds, then off for 3 seconds. Repeats based on 'Number of Repeats'."
-        case "Custom":
-            return "<b>Custom:</b> Define a sequence of ON and OFF steps with durations in milliseconds (e.g., ON:1000, OFF:500, ON:200). Repeats based on 'Number of Repeats'."
-        default:
-            return "Select a pattern type."
-    }
-}
-
 def patternPage() {
-    dynamicPage(name: "patternPage", title: "", nextPage: "mainPage") { // Removed title
-        display() // Added display call
-        section(getFormat("header-blue", "${getImage("Blank")}" + "Pattern Type")) { // Renamed section
+    dynamicPage(name: "patternPage", title: "", nextPage: "mainPage") {
+        display()
+        section(getFormat("header-blue", "${getImage("Blank")}" + "Pattern Type")) {
             input "patternType", "enum",
                 title: "Pattern Type",
-                options: ["Simple Flash", "Doorbell", "Emergency", "Strobe", "Standby", "Custom"], // Added Strobe & Standby
+                options: ["Simple Flash", "Doorbell", "Emergency", "Strobe", "Standby", "Custom"],
                 defaultValue: "Simple Flash",
                 required: true,
                 submitOnChange: true // Keep this to update the description dynamically
@@ -297,13 +270,13 @@ def patternPage() {
             } else if (settings.patternType == "Standby") {
                 paragraph "<b>Standby:</b> Device stays on for 3 seconds, then off for 3 seconds. Repeats based on 'Number of Repeats'."
             } else if (settings.patternType == "Custom") {
-                paragraph "<b>Custom:</b> Define your own flash duration and pause between flashes. Repeats based on 'Number of Repeats'."
+                paragraph "<b>Custom:</b> Define a sequence of ON and OFF steps with durations in milliseconds (e.g., ON:1000, OFF:500). Repeats based on 'Number of Repeats'."
             } else {
                  paragraph "Select a pattern type." // Default message
             }
         }
 
-        section(getFormat("header-blue", "${getImage("Blank")}" + "Pattern Repetition & Timing")) { // New section combining repeats and custom timing
+        section(getFormat("header-blue", "${getImage("Blank")}" + "Pattern Repetition & Timing")) {
             input "repeatCount", "number",
                 title: "Number of Repeats (0 = indefinite)",
                 required: true,
@@ -313,11 +286,11 @@ def patternPage() {
 
             if (patternType == "Custom") { // Only show sequence input for Custom pattern
                  paragraph "<b>Custom Sequence Definition</b>"
-                 input "customPatternSequence", "textArea", // Changed to textArea
+                 input "customPatternSequence", "textArea",
                     title: "Custom ON/OFF Sequence",
                     required: true,
                     defaultValue: "ON:1000, OFF:1000", // Default to a simple flash
-                    description: "Define the custom alert sequence here." // Shortened description
+                    description: "Define the custom alert sequence here."
 
                  // Add detailed instructions paragraph below the input
                  paragraph """<small><b>Instructions:</b><br>
@@ -328,7 +301,6 @@ def patternPage() {
                  • Do not include spaces within or immediately around the commas.<br>
                  <b>Example 1 (Simple Flash):</b> <code>ON:1000,OFF:1000</code><br>
                  <b>Example 2 (Quick Double Flash):</b> <code>ON:200,OFF:200,ON:200,OFF:1000</code><br>
-                 <!-- Example 3 Removed -->
                  </small>"""
             }
         }
@@ -362,14 +334,12 @@ def patternPage() {
                 title: "Restore Last State (disabled = all devices off after alert)",
                 defaultValue: true
         }
-
-        // Pattern Preview section removed
     }
 }
 
 def schedulePage() {
-    dynamicPage(name: "schedulePage", title: "", nextPage: "mainPage") { // Removed title
-        display() // Added display call
+    dynamicPage(name: "schedulePage", title: "", nextPage: "mainPage") {
+        display()
         section(getFormat("header-blue", "${getImage("Blank")}" + "Active Hours")) {
             input "activeStart", "time",
                 title: "Start Time",
@@ -412,23 +382,25 @@ def schedulePage() {
 }
 
 def advancedPage() {
-    dynamicPage(name: "advancedPage", title: "", nextPage: "mainPage") { // Removed title
-        display() // Added display call
+    dynamicPage(name: "advancedPage", title: "", nextPage: "mainPage") {
+        display()
         section(getFormat("header-blue", "${getImage("Blank")}" + "Failsafe Settings")) {
             input "timeout", "number",
                 title: "Pattern Timeout (minutes)",
                 required: true,
                 defaultValue: 5
 
-            input "retryCount", "number", // Note: retryCount is defined but not used in pattern execution
+            input "retryCount", "number",
                 title: "Retry Attempts",
                 required: true,
-                defaultValue: 3
+                defaultValue: 3,
+                range: "0..10",
+                description: "How many times to retry turning a device back ON if it fails to respond during state restoration"
 
-            input "cancelOnReverse", "bool", // Note: cancelOnReverse is defined but not used (switchHandler is inactive)
+            input "cancelOnReverse", "bool",
                 title: "Cancel Alert When Trigger Reverses",
                 defaultValue: true,
-                description: "Example: Stop alert when a switch turns off"
+                description: "Stop the alert when a trigger returns to normal (switch reverses, contact closes, motion goes inactive, sensor clears)"
         }
 
         section(getFormat("header-blue", "${getImage("Blank")}" + "Notifications")) {
@@ -474,13 +446,16 @@ def updated() {
 def initialize() {
     log.info "Initializing VisualAlert Child: ${alertName ?: 'Unnamed Alert'}"
 
-    // Initialize state variables
-    state.isAlertRunning = false // Use this flag for active alert state
-    // isPreviewRunning state variable removed
+    // Cross-execution flags live in atomicState so scheduled pattern steps and
+    // event handlers running concurrently always see the current value.
+    atomicState.isAlertRunning = false
     state.lastTriggerDevice = null
-    // atomicState.runLoop = false // Removed
-    state.previousStates = [:] // Store device states before alert (No longer used for restore, but kept for reference?)
-    // previewStates state variable removed
+
+    // Remove stale keys left behind by older versions
+    state.remove("isAlertRunning")
+    state.remove("isDisabled")
+    state.remove("previousStates")
+    state.remove("currentAlertStates")
 
     // Store restorePrevious setting in state for reliable access (read via settings map)
     // Default to true only if the setting is null (not set), otherwise use the actual boolean value
@@ -491,19 +466,26 @@ def initialize() {
     if (disableSwitch) {
         def conditionToDisable = settings.disableCondition ?: "ON" // Default to ON
         def currentSwitchValue = disableSwitch.currentValue("switch")
-        state.isDisabled = currentSwitchValue?.equalsIgnoreCase(conditionToDisable) ?: false // Be safe if current value is null
-        logDebug "initialize: Disable switch selected. Condition='${conditionToDisable}', CurrentValue='${currentSwitchValue}'. Initial isDisabled state: ${state.isDisabled}"
+        atomicState.isDisabled = currentSwitchValue?.equalsIgnoreCase(conditionToDisable) ?: false // Be safe if current value is null
+        logDebug "initialize: Disable switch selected. Condition='${conditionToDisable}', CurrentValue='${currentSwitchValue}'. Initial isDisabled state: ${atomicState.isDisabled}"
     } else {
-        state.isDisabled = false // No disable switch selected
+        atomicState.isDisabled = false // No disable switch selected
         logDebug "initialize: No disable switch selected. Initial isDisabled state: false"
     }
 
     // Subscribe to events
     subscribeToEvents()
     unschedule("executeDevicePattern") // Explicitly clear old handler name during init too
+}
 
-    // Subscribe to app button events (Test/Stop Test buttons)
-    subscribe(app, "buttonPressed", "appButtonHandler") // Re-enabled for Test button
+// Reports whether this alert is currently running (called by the parent app's health check)
+def isActive() {
+    return atomicState.isAlertRunning ?: false
+}
+
+// cancelOnReverse defaults to true when the advanced page has never been saved
+private boolean cancelOnReverseEnabled() {
+    return (settings.cancelOnReverse != null) ? (settings.cancelOnReverse as Boolean) : true
 }
 
 def subscribeToEvents() {
@@ -536,12 +518,16 @@ def subscribeToEvents() {
                 subscribe(device, "switch.off", switchHandler)
             }
         }
+        // If cancelOnReverse is enabled, also watch for sensors returning to normal
+        boolean watchReverse = cancelOnReverseEnabled()
+
         // Contact Sensors - Trigger
         if (contactSensors) {
             logDebug "Setting up contact sensor subscriptions for ${contactSensors.size()} devices"
             contactSensors.each { device ->
                 logDebug "Subscribing to contact sensor: ${device.displayName} (ID: ${device.id})"
                 subscribe(device, "contact.open", sensorHandler) // Subscribe to 'open' event
+                if (watchReverse) subscribe(device, "contact.closed", sensorHandler)
             }
         }
 
@@ -551,43 +537,46 @@ def subscribeToEvents() {
             motionSensors.each { device ->
                 logDebug "Subscribing to motion sensor: ${device.displayName} (ID: ${device.id})"
                 subscribe(device, "motion.active", sensorHandler) // Subscribe to 'active' event
+                if (watchReverse) subscribe(device, "motion.inactive", sensorHandler)
             }
         }
 
-// Smoke Sensors - Trigger
-if (smokeSensors) {
-    logDebug "Setting up smoke sensor subscriptions for ${smokeSensors.size()} devices"
-    smokeSensors.each { device ->
-        logDebug "Subscribing to smoke sensor: ${device.displayName} (ID: ${device.id})"
-        subscribe(device, "smoke.detected", sensorHandler) // Subscribe to 'detected' event
-    }
-}
+        // Smoke Sensors - Trigger
+        if (smokeSensors) {
+            logDebug "Setting up smoke sensor subscriptions for ${smokeSensors.size()} devices"
+            smokeSensors.each { device ->
+                logDebug "Subscribing to smoke sensor: ${device.displayName} (ID: ${device.id})"
+                subscribe(device, "smoke.detected", sensorHandler) // Subscribe to 'detected' event
+                if (watchReverse) subscribe(device, "smoke.clear", sensorHandler)
+            }
+        }
 
-// CO Sensors - Trigger
-if (coSensors) {
-    logDebug "Setting up CO sensor subscriptions for ${coSensors.size()} devices"
-    coSensors.each { device ->
-        logDebug "Subscribing to CO sensor: ${device.displayName} (ID: ${device.id})"
-        subscribe(device, "carbonMonoxide.detected", sensorHandler) // Subscribe to 'detected' event
-    }
-}
-// Water Sensors - Trigger
-if (waterSensors) {
-    logDebug "Setting up water sensor subscriptions for ${waterSensors.size()} devices"
-    waterSensors.each { device ->
-        logDebug "Subscribing to water sensor: ${device.displayName} (ID: ${device.id})"
-        subscribe(device, "water.wet", sensorHandler) // Subscribe to 'wet' event
-    }
-}
+        // CO Sensors - Trigger
+        if (coSensors) {
+            logDebug "Setting up CO sensor subscriptions for ${coSensors.size()} devices"
+            coSensors.each { device ->
+                logDebug "Subscribing to CO sensor: ${device.displayName} (ID: ${device.id})"
+                subscribe(device, "carbonMonoxide.detected", sensorHandler) // Subscribe to 'detected' event
+                if (watchReverse) subscribe(device, "carbonMonoxide.clear", sensorHandler)
+            }
+        }
 
-// Subscribe to the disable switch
-if (disableSwitch) {
-    logDebug "Subscribing to disable switch: ${disableSwitch.displayName}"
-    subscribe(disableSwitch, "switch", disableSwitchHandler)
-}
+        // Water Sensors - Trigger
+        if (waterSensors) {
+            logDebug "Setting up water sensor subscriptions for ${waterSensors.size()} devices"
+            waterSensors.each { device ->
+                logDebug "Subscribing to water sensor: ${device.displayName} (ID: ${device.id})"
+                subscribe(device, "water.wet", sensorHandler) // Subscribe to 'wet' event
+                if (watchReverse) subscribe(device, "water.dry", sensorHandler)
+            }
+        }
 
-logDebug "Subscribed to all event sources"
-logDebug "Subscribed to all event sources"
+        // Subscribe to the disable switch
+        if (disableSwitch) {
+            logDebug "Subscribing to disable switch: ${disableSwitch.displayName}"
+            subscribe(disableSwitch, "switch", disableSwitchHandler)
+        }
+
         logDebug "Subscribed to all event sources"
         logDebug "Current configuration:"
         logDebug "Selected Trigger Buttons: ${selectedButtons}"
@@ -609,8 +598,8 @@ def disableSwitchHandler(evt) {
 
     // Check if the current event value matches the condition that should disable the alert
     if (eventValue.equalsIgnoreCase(conditionToDisable)) {
-        if (!state.isDisabled) { // Only log and stop if changing state to disabled
-            state.isDisabled = true
+        if (!atomicState.isDisabled) { // Only log and stop if changing state to disabled
+            atomicState.isDisabled = true
             logDebug "Alerts DISABLED because ${evt.displayName} turned ${eventValue} (matches condition '${conditionToDisable}')"
             // Stop any active alert immediately when disabled
             stopAlertImmediate(reason: "disabled by switch ${evt.displayName}")
@@ -618,13 +607,12 @@ def disableSwitchHandler(evt) {
             logDebug "Alerts remain disabled (switch ${evt.displayName} is ${eventValue})"
         }
     } else {
-        if (state.isDisabled) { // Only log if changing state to enabled
-            state.isDisabled = false
+        if (atomicState.isDisabled) { // Only log if changing state to enabled
+            atomicState.isDisabled = false
             logDebug "Alerts ENABLED because ${evt.displayName} turned ${eventValue} (does not match condition '${conditionToDisable}')"
         } else {
             logDebug "Alerts remain enabled (switch ${evt.displayName} is ${eventValue})"
         }
-        logDebug "Alerts enabled by switch: ${evt.displayName}"
     }
 }
 
@@ -632,11 +620,6 @@ def disableSwitchHandler(evt) {
 
 // Handles physical button presses for trigger and stop
 def buttonHandler(evt) {
-    // Check if disabled
-    if (state.isDisabled) {
-        logDebug "Button event ignored: Alert is disabled by switch."
-        return
-    }
     logDebug "*************** Button Handler ***************"
     logDebug "Button Event: device=${evt.device.displayName}, deviceId=${evt.deviceId}, value=${evt.value}"
 
@@ -648,13 +631,16 @@ def buttonHandler(evt) {
     def selectedButtonsList = selectedButtons?.collect { it.toString().trim() }
     def selectedStopButtonsList = selectedStopButtons?.collect { it.toString().trim() }
 
-    // First check if this is a stop button
+    // First check if this is a stop button - stop must work even while disabled
     if (selectedStopButtonsList?.contains(buttonToCheck)) {
-        log.info "Stop button match found! Button: ${buttonToCheck}. Setting flags."
-        // atomicState.runLoop = false // Removed
-        // atomicState.stopRequested = true // Removed
-        // Call stopAlertImmediate mainly for cleanup, indicate source
+        log.info "Stop button match found! Button: ${buttonToCheck}."
         stopAlertImmediate(reason: "Stop button pressed: ${evt.device.displayName} Button ${evt.value}", fromButton: true)
+        return
+    }
+
+    // Check if disabled (only blocks trigger buttons, not stop buttons)
+    if (atomicState.isDisabled) {
+        logDebug "Button event ignored: Alert is disabled by switch."
         return
     }
 
@@ -683,8 +669,6 @@ def appButtonHandler(btn) {
 
         case "btnStopTest":
             logDebug "Stop Test button pressed - setting flags and calling stopAlertImmediate"
-            // atomicState.runLoop = false // Removed
-            // atomicState.stopRequested = true // Removed
             // Call stopAlertImmediate mainly for cleanup, indicate source
             stopAlertImmediate(reason: "Stop Test button pressed", fromButton: true)
             break
@@ -697,7 +681,7 @@ def appButtonHandler(btn) {
 // Handles switch 'on' and 'off' events for trigger switches
 def switchHandler(evt) {
     // Check if disabled
-    if (state.isDisabled) {
+    if (atomicState.isDisabled) {
         logDebug "Switch event ignored: Alert is disabled by switch."
         return
     }
@@ -725,15 +709,20 @@ def switchHandler(evt) {
         log.info "Trigger condition met for ${deviceName}: Event '${eventValue}' matches configured '${configuredTrigger}'"
         state.lastTriggerDevice = deviceId
         startAlert("Switch ${deviceName} turned ${eventValue}") // Use eventValue in reason
+    } else if (cancelOnReverseEnabled() && atomicState.isAlertRunning &&
+               state.lastTriggerDevice?.toString() == deviceId?.toString()) {
+        // The switch that triggered the running alert reversed (e.g., configured for ON and it turned OFF)
+        log.info "Trigger reversed: ${deviceName} turned ${eventValue}. Cancelling alert (cancelOnReverse enabled)."
+        stopAlertImmediate(reason: "trigger reversed: ${deviceName} turned ${eventValue}")
     } else {
         // Log if the event occurred but didn't match the configured trigger (e.g., switch turned ON but configured for OFF)
         logDebug "Switch event ignored: Event '${eventValue}' does not match configured trigger '${configuredTrigger}' for ${deviceName}"
     }
 }
-// Handles sensor 'detected' events for trigger sensors
+// Handles sensor trigger events and (when cancelOnReverse is enabled) return-to-normal events
 def sensorHandler(evt) {
     // Check if disabled
-    if (state.isDisabled) {
+    if (atomicState.isDisabled) {
         logDebug "Sensor event ignored: Alert is disabled by switch."
         return
     }
@@ -741,13 +730,16 @@ def sensorHandler(evt) {
     logDebug "Sensor Event: device=${evt.device.displayName}, deviceId=${evt.deviceId}, name=${evt.name}, value=${evt.value}"
 
     def triggerReason = null
+    boolean emergency = false // Smoke/CO are life-safety: force the Emergency pattern
     // Check for smoke detection
     if (evt.name == "smoke" && evt.value == "detected") {
         triggerReason = "Smoke detected by ${evt.device.displayName}"
+        emergency = true
     }
     // Check for CO detection
     else if (evt.name == "carbonMonoxide" && evt.value == "detected") {
         triggerReason = "CO detected by ${evt.device.displayName}"
+        emergency = true
     }
     // Check for water detection
     else if (evt.name == "water" && evt.value == "wet") {
@@ -767,11 +759,26 @@ def sensorHandler(evt) {
         log.info triggerReason
         state.lastTriggerDevice = evt.deviceId
         // Call startAlert - it handles conditions and stopping existing alerts
-        startAlert(triggerReason)
-    } else {
-        // Log if the event wasn't a 'detected' state we care about
-        logDebug "Sensor event ignored (name: ${evt.name}, value: ${evt.value})"
+        startAlert(triggerReason, emergency)
+        return
     }
+
+    // Return-to-normal events cancel a running alert when cancelOnReverse is enabled,
+    // but only when the reversing device is the one that triggered the alert
+    def reverseValues = [smoke: "clear", carbonMonoxide: "clear", water: "dry", contact: "closed", motion: "inactive"]
+    if (reverseValues[evt.name] == evt.value) {
+        if (cancelOnReverseEnabled() && atomicState.isAlertRunning &&
+            state.lastTriggerDevice?.toString() == evt.deviceId?.toString()) {
+            log.info "Trigger reversed: ${evt.device.displayName} ${evt.name} is ${evt.value}. Cancelling alert (cancelOnReverse enabled)."
+            stopAlertImmediate(reason: "trigger reversed: ${evt.device.displayName} ${evt.name} ${evt.value}")
+        } else {
+            logDebug "Return-to-normal event ignored (not the triggering device, no alert running, or cancelOnReverse disabled)"
+        }
+        return
+    }
+
+    // Log if the event wasn't a state we care about
+    logDebug "Sensor event ignored (name: ${evt.name}, value: ${evt.value})"
 }
 
 // --- Core Alert Logic ---
@@ -781,7 +788,16 @@ def isValidTrigger() {
     // Check time restrictions
     if (activeStart && activeEnd) {
         try {
-            if (!timeOfDayIsBetween(toDateTime(activeStart), toDateTime(activeEnd), new Date(), location.timeZone)) {
+            def startTime = toDateTime(activeStart)
+            def endTime = toDateTime(activeEnd)
+            boolean withinWindow
+            if (startTime.time <= endTime.time) {
+                withinWindow = timeOfDayIsBetween(startTime, endTime, new Date(), location.timeZone)
+            } else {
+                // Window crosses midnight (e.g., 22:00 - 06:00): active when NOT in the inverted window
+                withinWindow = !timeOfDayIsBetween(endTime, startTime, new Date(), location.timeZone)
+            }
+            if (!withinWindow) {
                 logDebug "Outside active hours"
                 return false
             }
@@ -834,7 +850,7 @@ def startAlert(reason, emergency = false) {
     logDebug "startAlert called with reason: ${reason}"
 
     // If an alert is already running, stop it immediately before starting new one
-    if (state.isAlertRunning) {
+    if (atomicState.isAlertRunning) {
         log.info "Alert already running, stopping it before starting new one: ${reason}"
         // Pass a specific reason to avoid double "end" notifications if desired
         stopAlertImmediate(reason: "new alert triggered", sendNotify: false)
@@ -850,12 +866,10 @@ def startAlert(reason, emergency = false) {
     log.info "Starting alert: ${reason}" + (state.lastTriggerDevice ? " (triggered by device ID: ${state.lastTriggerDevice})" : "")
 
     // --- Set Initial Alert State ---
-    state.isAlertRunning = true
-    // atomicState.runLoop = true // Removed, using state.isAlertRunning
+    atomicState.isAlertRunning = true
     state.alertStart = now()
     state.alertReason = reason
     unschedule() // Clear any previous timeout or repeat schedules
-    // atomicState.activePatternRuns = 0 // Removed counter logic
 
     // Save current device states if restoration is enabled (using value stored in state)
     logDebug "startAlert: Checking restorePreviousEnabled state value: ${state.restorePreviousEnabled}"
@@ -909,16 +923,18 @@ def startAlert(reason, emergency = false) {
             logDebug "Pattern is indefinite and timeout is 0, alert will run until stopped manually. No cleanup scheduled."
         }
     } else {
-        // Calculate total duration for ONE pattern loop running in PARALLEL
+        // Finite patterns restore immediately when the last step executes; this schedule
+        // is only a failsafe in case the step chain dies midway (error, hub restart).
+        // Allow generous per-step overhead so it never fires before a healthy pattern finishes.
         long loopDurationMs = patternInfo.commands.sum { it.duration ?: 0 }
         long totalPatternMs = loopDurationMs * patternInfo.repeatCount
-        // Add a buffer (e.g., 5 seconds overall) for overhead and potential delays
-        long bufferMs = 5000
+        int totalSteps = patternInfo.commands.size() * patternInfo.repeatCount
+        long bufferMs = 10000 + (totalSteps * 500)
         cleanupDelaySeconds = ((totalPatternMs + bufferMs) / 1000)
-        logDebug "Pattern is finite (${patternInfo.repeatCount} repeats). Scheduling final cleanup/restore in ${cleanupDelaySeconds} seconds (parallel execution)."
+        logDebug "Pattern is finite (${patternInfo.repeatCount} repeats). Scheduling failsafe cleanup/restore in ${cleanupDelaySeconds} seconds."
     }
 
-    // Schedule the final cleanup if a delay was determined (for both finite and infinite with timeout)
+    // Schedule the cleanup if a delay was determined (timeout for infinite, failsafe for finite)
     if (cleanupDelaySeconds > 0) {
         logDebug "Scheduling finalCleanupAndRestore in ${cleanupDelaySeconds} seconds. Reason: ${patternInfo.isInfinite ? 'timeout' : 'pattern completed'}"
         runIn(cleanupDelaySeconds.toInteger(), "finalCleanupAndRestore", [data: [reason: patternInfo.isInfinite ? "timeout" : "pattern completed"], overwrite: true])
@@ -931,10 +947,9 @@ def finalCleanupAndRestore(data) {
     log.info "Final cleanup and restore initiated due to: ${reason}"
 
     // Check if alert is still considered running (might have been stopped manually already)
-    // Note: state.isAlertRunning might be false if called directly from stopAlertImmediate
+    // Note: isAlertRunning might be false if called directly from stopAlertImmediate
     // We proceed anyway to ensure restoration happens after an immediate stop.
-    // if (!state.isAlertRunning && reason != "manual stop" && !reason.startsWith("Stop")) { // More complex check if needed
-    if (!state.isAlertRunning && reason == "pattern completed") { // Only skip if already stopped AND it was a normal completion
+    if (!atomicState.isAlertRunning && reason == "pattern completed") { // Only skip if already stopped AND it was a normal completion
         logDebug "Alert already stopped (likely via immediate stop), ignoring scheduled finalCleanupAndRestore call for 'pattern completed'."
         unschedule("finalCleanupAndRestore")
         return
@@ -942,15 +957,14 @@ def finalCleanupAndRestore(data) {
 
     // --- Stop Pattern & Restore State ---
     // Set running flag false FIRST to signal loops (if not already false from immediate stop)
-    if (state.isAlertRunning) {
-        state.isAlertRunning = false
-        logDebug "finalCleanupAndRestore: Set state.isAlertRunning to false"
+    if (atomicState.isAlertRunning) {
+        atomicState.isAlertRunning = false
+        logDebug "finalCleanupAndRestore: Set atomicState.isAlertRunning to false"
     }
-    // atomicState.runLoop = false // Removed
     unschedule("processPatternStep") // Cancel any pending steps
 
     // --- Conditionally Force ON for Immediate Stops ---
-    def immediateStopReasons = ["manual stop", "Stop Test button pressed", "Stop button pressed", "disabled by switch", "new alert triggered"]
+    def immediateStopReasons = ["manual stop", "Stop Test button pressed", "Stop button pressed", "disabled by switch", "new alert triggered", "trigger reversed"]
     boolean isImmediateStop = immediateStopReasons.any { reason.contains(it) }
 
     if (isImmediateStop) {
@@ -1004,20 +1018,15 @@ def finalCleanupAndRestore(data) {
 
     // --- Final State Cleanup ---
     logDebug "Final cleanup: Clearing state variables."
-    state.lastTriggerDevice = null
+    // When a new alert preempts this one, the handler has already stored the new
+    // trigger device in lastTriggerDevice - don't wipe it
+    if (reason != "new alert triggered") {
+        state.lastTriggerDevice = null
+    }
     state.alertStart = null
     state.alertReason = null
     atomicState.previousStatesJson = null // Ensure JSON is cleared after use/attempt
     atomicState.currentPatternParamsJson = null // Clean up pattern params
-}
-
-// Stops the alert due to external trigger (e.g., timeout handled by runIn calling finalCleanupAndRestore)
-def stopAlert(data) {
-    // This handler is now primarily for the timeout case scheduled by startAlert
-    // It should just call the central cleanup function
-    logDebug("stopAlert called (likely timeout), unscheduling and calling finalCleanupAndRestore.")
-    unschedule("finalCleanupAndRestore") // Prevent duplicate execution
-    finalCleanupAndRestore(data) // Pass the reason ("timeout")
 }
 
 // Stops the alert immediately (e.g., manual stop button, new alert starting)
@@ -1027,13 +1036,11 @@ def stopAlertImmediate(evtOrParams = null) {
     def data = evtOrParams?.data instanceof Map ? evtOrParams.data : [:]
 
     def reason = data.reason ?: params.reason ?: "manual stop"
-    // Notification sending is now handled solely within finalCleanupAndRestore
-    // boolean sendNotify = data.get("sendNotify", params.get("sendNotify", true)) // Removed
 
     log.info "Stopping alert immediately (stopAlertImmediate): ${reason}"
 
     // Check if alert is actually running
-    if (!state.isAlertRunning) {
+    if (!atomicState.isAlertRunning) {
         logDebug "Alert not running when stopAlertImmediate called, ignoring."
         // Ensure any lingering cleanup schedule is cancelled
         unschedule("finalCleanupAndRestore")
@@ -1041,20 +1048,14 @@ def stopAlertImmediate(evtOrParams = null) {
     }
 
     // Signal loops to stop by setting the central flag FIRST
-    state.isAlertRunning = false
-    logDebug "stopAlertImmediate: Set state.isAlertRunning to false"
-    // atomicState.runLoop = false // Removed
+    atomicState.isAlertRunning = false
+    logDebug "stopAlertImmediate: Set atomicState.isAlertRunning to false"
     unschedule("processPatternStep") // Cancel any pending steps FIRST
     logDebug "stopAlertImmediate: Unscheduled any pending processPatternStep."
 
     // Cancel any scheduled final cleanup
     unschedule("finalCleanupAndRestore")
     logDebug "stopAlertImmediate: Unscheduled any pending finalCleanupAndRestore."
-
-    // --- REMOVED: Force devices ON before calling cleanup/restore for immediate stops ---
-    // logDebug("stopAlertImmediate: Forcing devices ON before calling finalCleanupAndRestore.")
-    // devices?.on()
-    // --- END REMOVAL ---
 
     // Call the central cleanup function immediately
     // Pass the reason, which will now be checked inside finalCleanupAndRestore
@@ -1117,7 +1118,6 @@ void saveDeviceStates() {
         log.error "Error converting device states map to JSON: ${e.message}"
         atomicState.previousStatesJson = null // Ensure it's null on error
     }
-    // Removed return statement
 }
 
 // Restores device states after an alert stops
@@ -1128,9 +1128,6 @@ def restoreDeviceStates(Map statesToRestore) { // Now requires the map to restor
         devices?.off()
         // Clear atomicState JSON even if restore failed/wasn't needed
         atomicState.previousStatesJson = null
-        // Clear both state maps after attempting restore
-        state.previousStates = [:]
-        state.currentAlertStates = null
         return
     }
 
@@ -1167,10 +1164,15 @@ def restoreDeviceStates(Map statesToRestore) { // Now requires the map to restor
                     device.on()
                     logDebug "Restored ${device.displayName} to ON"
 
-                    // Verification step (optional but recommended for problematic devices)
-                    pauseExecution(1000)
-                    if (device.currentValue("switch") != "on") {
-                        log.warn "Device ${device.displayName} did not report ON after restore (current: ${device.currentValue('switch')}), trying ON command again."
+                    // Verification step: retry up to the configured Retry Attempts if the device
+                    // doesn't report ON (helpful for slow/problematic Z-Wave devices)
+                    int maxRetries = (settings.retryCount != null) ? (settings.retryCount as Integer) : 3
+                    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+                        pauseExecution(1000)
+                        if (device.currentValue("switch") == "on") {
+                            break
+                        }
+                        log.warn "Device ${device.displayName} did not report ON after restore (current: ${device.currentValue('switch')}), retry ${attempt}/${maxRetries}."
                         device.on()
                     }
                 } else {
@@ -1275,7 +1277,6 @@ def getPatternInfo(String type = null) {
             info.commands = [
                 [on: true, duration: 300], [on: false, duration: 300], // Quick flash 1
                 [on: true, duration: 300], [on: false, duration: 1000]  // Quick flash 2, pause
-                // Removed extra flashes, repeatCount handles repetition
             ]
             // info.repeatCount is set above from input
             break
@@ -1284,10 +1285,9 @@ def getPatternInfo(String type = null) {
                 [on: true, duration: 300], [on: false, duration: 300]
             ]
             // info.repeatCount is set above from input
-            // info.color = "#FF0000" // Removed hardcoded red color
             info.level = 100 // Force full brightness
             break
-        case "Strobe": // New Strobe pattern
+        case "Strobe":
             info.commands = [
                 [on: true, duration: 200], [on: false, duration: 200],
                 [on: true, duration: 200], [on: false, duration: 200],
@@ -1295,7 +1295,7 @@ def getPatternInfo(String type = null) {
             ]
             // info.repeatCount is set above from input
             break
-        case "Standby": // New Standby pattern
+        case "Standby":
              info.commands = [
                 [on: true, duration: 3000], // On for 3 seconds
                 [on: false, duration: 3000] // Off for 3 seconds
@@ -1369,19 +1369,16 @@ def getPatternInfo(String type = null) {
     info.offLevel = settings.offLevel ?: 0 // Use settings.offLevel
 
     logDebug "Generated pattern info: ${info}" // Keep log for debugging
-    // Duplicate offLevel line removed
-
-    // logDebug "Generated pattern info: ${info}" // Log moved up
     return info
 }
 
-// New function to handle one step of the pattern for ALL devices
+// Handles one step of the pattern for ALL devices
 def processPatternStep(data) {
     int stepIndex = data.stepIndex ?: 0
     int loopCounter = data.loopCounter ?: 0
 
     // Check if alert is still running
-    if (!state.isAlertRunning) {
+    if (!atomicState.isAlertRunning) {
         logDebug "processPatternStep: Alert stopped. Exiting step ${stepIndex}, loop ${loopCounter}."
         atomicState.remove("currentPatternParamsJson") // Clean up if stopped mid-pattern
         return
@@ -1504,17 +1501,17 @@ def processPatternStep(data) {
     }
 
     // Check again if alert is running before scheduling/forcing ON
-    if (!state.isAlertRunning) {
+    if (!atomicState.isAlertRunning) {
         logDebug "processPatternStep: Alert stopped after processing step ${stepIndex}. Not scheduling next step or forcing ON."
         return
     }
 
     if (isLastStepOfLastLoop) {
-        // This was the final step of a finite pattern
-        logDebug "processPatternStep: Executed final step of finite pattern. Forcing devices ON immediately."
-        settings.devices?.on() // Force ON immediately after last step
-        logDebug "processPatternStep: Finished last loop (${nextLoopCounter}/${repeatCount}). No more steps to schedule."
-        // Final cleanup (restore) is handled by the scheduled finalCleanupAndRestore
+        // Final step of a finite pattern: restore devices right now instead of waiting
+        // for the scheduled failsafe. Cancel the failsafe since we no longer need it.
+        logDebug "processPatternStep: Executed final step of finite pattern. Restoring devices now."
+        unschedule("finalCleanupAndRestore")
+        finalCleanupAndRestore([reason: "pattern completed"])
     } else if (isInfinite || nextLoopCounter < repeatCount) {
         // Schedule the next step if the pattern should continue
         logDebug "processPatternStep: Scheduling next step (Index: ${nextStepIndex}, Loop: ${nextLoopCounter}) in ${duration}ms"
@@ -1525,53 +1522,6 @@ def processPatternStep(data) {
         // Final cleanup is handled by the scheduled finalCleanupAndRestore
     }
 }
-
-
-// Old executeDevicePattern function removed
-
-// Helper to set device attributes (level, color, CT)
-private void setDeviceAttributes(device, Map attrs) {
-    logDebug "Setting attributes for ${device.displayName}: ${attrs}"
-    try {
-        // Set Color Temp or Color first
-        if (attrs.colorTemperature != null && hasColorTemperature(device)) {
-            device.setColorTemperature(attrs.colorTemperature)
-            logDebug "Set Color Temperature: ${attrs.colorTemperature}"
-            pauseExecution(300)
-        } else if (attrs.colorMap && hasColorCapability(device)) { // Check for colorMap first
-             try {
-                // Use setColor with the HSL map
-                device.setColor(attrs.colorMap)
-                logDebug "Set Color using setColor with Map: ${attrs.colorMap}"
-                pauseExecution(300)
-            } catch (e) {
-                 logWarn "setColor with Map failed for ${device.displayName}: ${e.message}"
-                 // Optional: Fallback to trying hex if map fails? Might be risky.
-            }
-        } else if (attrs.color && hasColorCapability(device)) { // Fallback to original color attribute if colorMap not present
-             try {
-                // Use setColor map if possible (original logic)
-                device.setColor(attrs.color) // Assumes color is a hex string or map
-                logDebug "Set Color using setColor (fallback): ${attrs.color}"
-                pauseExecution(300)
-            } catch (e) {
-                 logWarn "setColor (fallback) failed for ${device.displayName}: ${e.message}"
-            }
-        }
-
-        // Set Level
-        if (attrs.level != null && hasLevelCapability(device)) {
-            device.setLevel(attrs.level)
-            logDebug "Set Level: ${attrs.level}"
-            pauseExecution(300)
-        }
-    } catch (Exception e) {
-        log.warn "Error setting attributes for ${device.displayName}: ${e.message}"
-    }
-}
-
-// --- Preview Logic Removed ---
-// Preview functions (previewPattern, stopPreviewImmediate) removed.
 
 
 // --- Utility Methods ---
@@ -1708,16 +1658,12 @@ def sendNotification(String message) {
         logDebug "Sending notification to devices: ${message}"
         notificationDevices.deviceNotification(message)
     }
-    // Check if parent notifications are enabled
-    if (parent?.sendChildNotification) { // Check if method exists
-        try {
-            parent.sendChildNotification(message) // Send notification via parent
-            logDebug "Sent notification to parent app: ${message}"
-        } catch (Exception e) {
-            log.warn "Could not send notification to parent app: ${e.message}"
-        }
-    } else {
-        logDebug "Parent app notifications are disabled."
+    // Route through the parent app, which honors the global notification setting
+    try {
+        parent?.sendChildNotification(message)
+        logDebug "Sent notification to parent app: ${message}"
+    } catch (Exception e) {
+        log.warn "Could not send notification to parent app: ${e.message}"
     }
 }
 
@@ -1750,13 +1696,11 @@ private String getImage(img) {
 // Helper to display common elements (like title)
 private void display() {
     setVersion()
-    // paragraph title() // Removed paragraph wrapper
-    // paragraph "<hr>" // Removed horizontal rule
 }
 
 // Sets the version number in state
 private void setVersion(){
-    state.version = "1.1.5" // Update this with the actual version
+    state.version = "1.3.0"
 }
 
 // Provides the title for display pages
